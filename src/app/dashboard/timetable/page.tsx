@@ -238,7 +238,7 @@ export default function TimetablePage() {
            </p>
         </div>
 
-        <div className="w-fit flex flex-wrap items-center gap-2 p-1 bg-slate-900/50 backdrop-blur-xl rounded-lg border border-white/5">
+        <div className="flex flex-wrap items-center gap-2 p-1 bg-slate-900/50 backdrop-blur-xl rounded-lg border border-white/5">
             <button 
               onClick={() => setActiveTab('timetable')}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${activeTab === 'timetable' ? 'bg-white text-slate-950' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
