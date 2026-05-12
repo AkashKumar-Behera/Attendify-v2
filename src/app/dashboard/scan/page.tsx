@@ -296,7 +296,7 @@ export default function ScanPage() {
                 <div className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-blue-400/60 rounded-br-lg"></div>
             </div>
 
-            <div id="reader" className="w-full h-full scale-x-[-1]"></div>
+            <div id="reader" className="w-full h-full"></div>
         </div>
 
         <div className="mt-8 flex flex-col gap-4">
