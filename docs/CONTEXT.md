@@ -19,6 +19,11 @@ This file serves as a persistent memory and activity log for all AI agents (Gemi
 
 ---
 
+### [2026-05-12 16:15] | Agent: Antigravity | Task: Smartboard Timer Visibility & Filter Logic | Status: Done
+- Restored and enhanced Smartboard timer visibility with high-contrast styling and "Time Remaining" label.
+- Implemented status-based filtering (Present, Proxy, Absent, Pending) using legend buttons.
+- Optimized student grid rendering to support dynamic filtering and status updates.
+
 ### [2026-05-12 16:00] | Agent: Antigravity | Task: Fixed QR Scanner Camera Mirroring | Status: Done
 - Removed `scale-x-[-1]` from the QR scanner container.
 - Prevented the environment (rear) camera feed from being horizontally mirrored, ensuring accurate and natural scanning orientation.

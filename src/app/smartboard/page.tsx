@@ -33,6 +33,7 @@ export default function SmartboardPage() {
   
   const [timeLeft, setTimeLeft] = useState(120); // 2 minutes
   const [qrNonce, setQrNonce] = useState(0);
+  const [filterStatus, setFilterStatus] = useState<"all" | "present" | "proxy" | "absent">("all");
 
   useEffect(() => {
     setIsMounted(true);
@@ -442,31 +443,52 @@ export default function SmartboardPage() {
                    </div>
                 </div>
 
+                {/* Filter Info */}
+                {filterStatus !== "all" && (
+                   <div className="mb-4 flex items-center gap-2">
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Active Filter:</span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest ${
+                         filterStatus === 'present' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50' :
+                         filterStatus === 'proxy' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50' :
+                         'bg-rose-500/20 text-rose-400 border border-rose-500/50'
+                      }`}>
+                         {filterStatus}
+                      </span>
+                      <button onClick={() => setFilterStatus("all")} className="text-[10px] font-bold text-blue-500 hover:underline ml-2">Clear</button>
+                   </div>
+                )}
+
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 overflow-y-auto pr-2 custom-scrollbar flex-1 content-start relative z-10 pb-10">
-                   {filteredStudents.map((student, idx) => {
-                      const st = attendanceData[student.id]?.status;
-                      const isAbsent = timeLeft === 0 && !st;
-                      const finalStatus = isAbsent ? 'absent' : st;
-                      const colorClass = getStudentStatusColor(finalStatus);
-                      
-                      return (
-                        <div 
-                           key={student.id} 
-                           onClick={() => handleManualOverride(student.id, finalStatus || 'pending')}
-                           className={`p-3 rounded-lg border ${colorClass} ${timeLeft === 0 ? 'cursor-pointer hover:scale-105 shadow-xl' : 'cursor-default'} transition-all flex flex-col justify-between aspect-[4/3] backdrop-blur-sm`}
-                        >
-                           <p className="text-xs font-bold truncate text-white">{student.name}</p>
-                           <div className="flex items-end justify-between mt-2">
-                              <p className="text-xs font-black opacity-60 font-mono">
-                                {student.regNo ? student.regNo.slice(-4) : String(idx+1).padStart(2, '0')}
-                              </p>
-                              {finalStatus === 'present' && <CheckCircle size={16} className="text-emerald-400" />}
-                              {finalStatus === 'proxy' && <AlertCircle size={16} className="text-amber-400" />}
-                              {finalStatus === 'absent' && <XCircle size={16} className="text-rose-500" />}
-                           </div>
-                        </div>
-                      );
-                   })}
+                   {filteredStudents
+                     .filter(s => {
+                        if (filterStatus === "all") return true;
+                        const st = attendanceData[s.id]?.status || (timeLeft === 0 ? 'absent' : 'pending');
+                        return st === filterStatus;
+                     })
+                     .map((student, idx) => {
+                       const st = attendanceData[student.id]?.status;
+                       const isAbsent = timeLeft === 0 && !st;
+                       const finalStatus = isAbsent ? 'absent' : st;
+                       const colorClass = getStudentStatusColor(finalStatus);
+                       
+                       return (
+                         <div 
+                            key={student.id} 
+                            onClick={() => handleManualOverride(student.id, finalStatus || 'pending')}
+                            className={`p-3 rounded-lg border ${colorClass} ${timeLeft === 0 ? 'cursor-pointer hover:scale-105 shadow-xl' : 'cursor-default'} transition-all flex flex-col justify-between aspect-[4/3] backdrop-blur-sm`}
+                         >
+                            <p className="text-xs font-bold truncate text-white">{student.name}</p>
+                            <div className="flex items-end justify-between mt-2">
+                               <p className="text-xs font-black opacity-60 font-mono">
+                                 {student.regNo ? student.regNo.slice(-4) : String(idx+1).padStart(2, '0')}
+                               </p>
+                               {finalStatus === 'present' && <CheckCircle size={16} className="text-emerald-400" />}
+                               {finalStatus === 'proxy' && <AlertCircle size={16} className="text-amber-400" />}
+                               {finalStatus === 'absent' && <XCircle size={16} className="text-rose-500" />}
+                            </div>
+                         </div>
+                       );
+                    })}
                    
                    {filteredStudents.length === 0 && (
                       <div className="col-span-full h-40 flex items-center justify-center border border-dashed border-white/10 rounded-lg">
@@ -497,31 +519,51 @@ export default function SmartboardPage() {
                       Session ID: {sessionId}
                    </p>
                    
-                   <div className={`text-5xl font-black font-mono tracking-tighter relative z-10 ${timeLeft === 0 ? 'text-rose-500' : 'text-blue-400 drop-shadow-[0_0_15px_rgba(59,130,246,0.5)]'}`}>
-                      {formatTime(timeLeft)}
-                   </div>
-                   {timeLeft === 0 && <p className="text-[10px] text-rose-400 mt-2 uppercase tracking-widest font-bold animate-pulse relative z-10">Manual override active</p>}
+                   <div className="flex flex-col items-center relative z-10">
+                       <p className={`text-[10px] font-black uppercase tracking-[0.3em] mb-2 ${timeLeft === 0 ? 'text-rose-500' : 'text-slate-500'}`}>
+                          {timeLeft === 0 ? 'Session Expired' : 'Time Remaining'}
+                       </p>
+                       <div className={`text-6xl font-black font-mono tracking-tighter ${timeLeft === 0 ? 'text-rose-500' : 'text-blue-400 drop-shadow-[0_0_20px_rgba(59,130,246,0.6)]'}`}>
+                          {formatTime(timeLeft)}
+                       </div>
+                       {timeLeft === 0 && <p className="text-[10px] text-rose-400 mt-2 uppercase tracking-widest font-bold animate-pulse">Manual override active</p>}
+                    </div>
                 </div>
 
-                <div className="card-premium p-5 space-y-4">
-                   <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-white/5 pb-2">Status Legend</h4>
-                   <div className="flex items-center gap-3">
-                      <div className="w-3 h-3 rounded bg-emerald-500/20 border border-emerald-500 flex-shrink-0"></div>
-                      <p className="text-xs text-slate-300 font-medium">Present</p>
-                   </div>
-                   <div className="flex items-center gap-3">
-                      <div className="w-3 h-3 rounded bg-amber-500/20 border border-amber-500 flex-shrink-0"></div>
-                      <p className="text-xs text-slate-300 font-medium">Suspected Proxy</p>
-                   </div>
-                   <div className="flex items-center gap-3">
-                      <div className="w-3 h-3 rounded bg-rose-500/20 border border-rose-500 flex-shrink-0"></div>
-                      <p className="text-xs text-slate-300 font-medium">Absent / Rejected</p>
-                   </div>
-                   <div className="flex items-center gap-3">
-                      <div className="w-3 h-3 rounded bg-slate-800 border border-slate-700 flex-shrink-0"></div>
-                      <p className="text-xs text-slate-300 font-medium">Pending</p>
-                   </div>
-                </div>
+                 <div className="card-premium p-5 space-y-4">
+                    <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-white/5 pb-2">Status Legend</h4>
+                    <button 
+                       onClick={() => setFilterStatus("present")}
+                       className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${filterStatus === 'present' ? 'bg-emerald-500/20 border border-emerald-500/50 ring-2 ring-emerald-500/20' : 'hover:bg-white/5 border border-transparent'}`}
+                    >
+                       <div className="w-3 h-3 rounded bg-emerald-500 flex-shrink-0 shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
+                       <p className="text-xs text-slate-300 font-black uppercase tracking-widest">Present</p>
+                    </button>
+                    
+                    <button 
+                       onClick={() => setFilterStatus("proxy")}
+                       className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${filterStatus === 'proxy' ? 'bg-amber-500/20 border border-amber-500/50 ring-2 ring-amber-500/20' : 'hover:bg-white/5 border border-transparent'}`}
+                    >
+                       <div className="w-3 h-3 rounded bg-amber-500 flex-shrink-0 shadow-[0_0_10px_rgba(245,158,11,0.5)]"></div>
+                       <p className="text-xs text-slate-300 font-black uppercase tracking-widest">Suspected Proxy</p>
+                    </button>
+                    
+                    <button 
+                       onClick={() => setFilterStatus("absent")}
+                       className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${filterStatus === 'absent' ? 'bg-rose-500/20 border border-rose-500/50 ring-2 ring-rose-500/20' : 'hover:bg-white/5 border border-transparent'}`}
+                    >
+                       <div className="w-3 h-3 rounded bg-rose-500 flex-shrink-0 shadow-[0_0_10px_rgba(244,63,94,0.5)]"></div>
+                       <p className="text-xs text-slate-300 font-black uppercase tracking-widest">Absent / Rejected</p>
+                    </button>
+                    
+                    <button 
+                       onClick={() => setFilterStatus("all")}
+                       className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${filterStatus === 'all' ? 'bg-blue-500/20 border border-blue-500/50 ring-2 ring-blue-500/20' : 'hover:bg-white/5 border border-transparent'}`}
+                    >
+                       <div className="w-3 h-3 rounded bg-slate-500 flex-shrink-0"></div>
+                       <p className="text-xs text-slate-300 font-black uppercase tracking-widest">Pending / All</p>
+                    </button>
+                 </div>
              </div>
           </div>
         )}
