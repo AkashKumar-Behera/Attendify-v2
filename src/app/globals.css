@@ -1,0 +1,115 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #020617;
+  --color-foreground: #f8fafc;
+}
+
+:root {
+  --background: #020617;
+  --foreground: #f8fafc;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  color: var(--foreground);
+  background-color: #020617;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: #020617;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 10px;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@layer components {
+  /* 3D Button Style */
+  .btn-3d-blue {
+    @apply relative bg-blue-600 text-white font-bold rounded-xl transition-all duration-100;
+    box-shadow: 0 4px 0 #1d4ed8, 0 8px 15px rgba(0, 0, 0, 0.3);
+  }
+  .btn-3d-blue:hover {
+    @apply translate-y-[1px];
+    box-shadow: 0 3px 0 #1d4ed8, 0 6px 12px rgba(0, 0, 0, 0.3);
+  }
+  .btn-3d-blue:active {
+    @apply translate-y-[4px];
+    box-shadow: 0 0 0 #1d4ed8, 0 2px 4px rgba(0, 0, 0, 0.3);
+  }
+
+  .btn-3d-slate {
+    @apply relative bg-slate-800 text-slate-200 font-bold rounded-xl transition-all duration-100;
+    box-shadow: 0 4px 0 #0f172a, 0 8px 15px rgba(0, 0, 0, 0.3);
+  }
+  .btn-3d-slate:active {
+    @apply translate-y-[4px];
+    box-shadow: 0 0 0 #0f172a, 0 2px 4px rgba(0, 0, 0, 0.3);
+  }
+
+  /* Soft Neumorphic Card */
+  .card-premium {
+    @apply bg-[#0f172a] border border-slate-800/50 rounded-[1.5rem];
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 
+                inset 0 1px 1px rgba(255, 255, 255, 0.05);
+  }
+
+  .glass-header {
+    background-color: rgba(2, 6, 23, 0.8);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid rgba(30, 41, 59, 0.5);
+  }
+}
+
+/* QR Scanner Custom UI Overrides */
+#reader {
+  border: none !important;
+  background: transparent !important;
+}
+#reader video {
+  border-radius: 1.5rem !important;
+  object-fit: cover !important;
+}
+#reader__dashboard_section_csr button {
+    @apply bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-widest transition-all mb-4;
+    box-shadow: 0 4px 0 #1d4ed8;
+}
+#reader__dashboard_section_csr button:active {
+    @apply translate-y-1;
+    box-shadow: 0 0 0 #1d4ed8;
+}
+
+@keyframes scan-line {
+  0% { top: 0%; }
+  100% { top: 100%; }
+}
+
+.scanner-line {
+  position: absolute;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(to right, transparent, #3b82f6, transparent);
+  box-shadow: 0 0 15px #3b82f6;
+  animation: scan-line 2s linear infinite;
+  z-index: 10;
+}
