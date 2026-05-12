@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Html5Qrcode } from "html5-qrcode";
 import { db } from "@/lib/firebase";
-import { doc, updateDoc, collection, addDoc, setDoc, onSnapshot } from "firebase/firestore";
+import { doc, updateDoc, collection, addDoc, setDoc, onSnapshot, getDocs, query, where } from "firebase/firestore";
 import { useAuth } from "@/lib/AuthContext";
 import { CheckCircle2, AlertTriangle, MapPin, Scan, ShieldCheck, RefreshCw, Power, PowerOff, ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -191,31 +191,59 @@ export default function ScanPage() {
         setStatus({ type: "error", message: "Sync Failed" });
       }
     } 
+    else if (decodedText.startsWith("EXPIRED_SESSION:")) {
+        setStatus({ type: "error", message: "QR Code Expired. You were too slow!" });
+        return;
+    }
     else if (decodedText.startsWith("ATTENDANCE:") && userData?.role === "student") {
-        const sessionId = decodedText.split(":")[1];
+        const parts = decodedText.split(":");
+        const sessionId = parts[1];
+        const scannedNonce = parseInt(parts[2]);
+
         if (!location) {
             setStatus({ type: "error", message: "GPS Location Required" });
             return;
         }
 
         try {
+            // SECURITY CHECK: Fetch session status and current nonce
+            const sessionRef = doc(db, "smartboardSessions", sessionId);
+            const sessionSnap = await getDocs(query(collection(db, "smartboardSessions"), where("boardId", "==", sessionId)));
+            
+            if (sessionSnap.empty) {
+                setStatus({ type: "error", message: "Invalid Session" });
+                return;
+            }
+
+            const sessionData = sessionSnap.docs[0].data();
+
+            // 1. Check if session is still open
+            if (sessionData.status !== "marking-attendance") {
+                setStatus({ type: "error", message: "Session Locked. Too late!" });
+                return;
+            }
+
+            // 2. Verify QR Nonce (Anti-Cheat)
+            if (sessionData.currentNonce !== scannedNonce) {
+                setStatus({ type: "error", message: "Expired QR. Please scan the live code." });
+                return;
+            }
+
             let attendanceStatus = "present";
             let msg = "Attendance Marked!";
             let type: "success" | "error" | "warning" = "success";
 
             if (isMockLocation) {
-                attendanceStatus = "proxy";
-                msg = "Mock Location Suspected. Marked as Proxy.";
-                type = "warning";
+                setStatus({ type: "error", message: "Mock Location Detected. Rejected." });
+                return;
             } else if (allowedCoordinates.length > 0) {
                 const isWithinRange = allowedCoordinates.some(coord => {
                     const dist = getDistanceFromLatLonInM(location.lat, location.lng, coord.lat, coord.lng);
                     return dist <= 50;
                 });
                 if (!isWithinRange) {
-                    attendanceStatus = "proxy";
-                    msg = "Out of Classroom bounds. Marked as Proxy.";
-                    type = "warning";
+                    setStatus({ type: "error", message: "Out of Classroom bounds. Rejected." });
+                    return;
                 }
             }
 
@@ -233,7 +261,8 @@ export default function ScanPage() {
             setStatus({ type, message: msg });
             await nuclearKillCamera();
         } catch (err) {
-            setStatus({ type: "error", message: "Submit Failed" });
+            console.error("Attendance submission error:", err);
+            setStatus({ type: "error", message: "Verification Failed" });
         }
     }
   }
@@ -242,6 +271,23 @@ export default function ScanPage() {
 
   return (
     <div className="max-w-md mx-auto space-y-6 animate-in fade-in zoom-in duration-300 p-4">
+      {/* Fake GPS Blocker Overlay */}
+      {isMockLocation && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl animate-in fade-in duration-300">
+           <div className="max-w-md w-full bg-slate-900 border border-rose-500/20 p-8 rounded-3xl text-center shadow-[0_0_50px_rgba(244,63,94,0.1)]">
+              <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-6 border border-rose-500/20">
+                 <AlertTriangle size={32} />
+              </div>
+              <h2 className="text-xl font-black text-white uppercase tracking-widest mb-3">Fake GPS Detected</h2>
+              <p className="text-xs text-slate-400 font-medium mb-8 leading-relaxed">
+                 You appear to be using a Mock Location or Fake GPS application. Scanning is disabled until you use your real location.
+              </p>
+              <button onClick={() => { nuclearKillCamera(); router.back(); }} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all">
+                 Return to Dashboard
+              </button>
+           </div>
+        </div>
+      )}
       <div className="card-premium p-6 md:p-8 relative overflow-hidden">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
