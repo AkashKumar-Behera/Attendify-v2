@@ -19,6 +19,9 @@ This file serves as a persistent memory and activity log for all AI agents (Gemi
 
 ---
 
+### [2026-05-12 16:30] | Agent: Antigravity | Task: Timetable UI Layout Fix (Extra Space) | Status: Done
+- Added `w-fit` to the timetable tab container in `src/app/dashboard/timetable/page.tsx`.
+- This prevents the container from stretching to full width on mobile, removing the "extra space" on the right side of the buttons for teachers.
 ### [2026-05-12 16:15] | Agent: Antigravity | Task: Smartboard Timer Visibility & Filter Logic | Status: Done
 - Restored and enhanced Smartboard timer visibility with high-contrast styling and "Time Remaining" label.
 - Implemented status-based filtering (Present, Proxy, Absent, Pending) using legend buttons.
