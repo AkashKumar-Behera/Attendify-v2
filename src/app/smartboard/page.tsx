@@ -3,17 +3,24 @@
 import { useEffect, useState } from "react";
 import QRCode from "react-qr-code";
 import { db } from "@/lib/firebase";
-import { doc, onSnapshot, setDoc, deleteDoc, updateDoc, query, collection, where, getDocs } from "firebase/firestore";
+import { doc, onSnapshot, setDoc, deleteDoc, updateDoc, query, collection, where, getDocs, serverTimestamp, Timestamp } from "firebase/firestore";
 import { useRouter } from "next/navigation";
-import { Monitor, ShieldCheck, Clock, Box, LayoutGrid, CheckCircle, AlertCircle, XCircle } from "lucide-react";
+import { Monitor, ShieldCheck, Clock, Box, LayoutGrid, CheckCircle, AlertCircle, XCircle, Save, RefreshCw, Trophy } from "lucide-react";
 
 export default function SmartboardPage() {
+  const router = useRouter();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "waiting" | "authenticated" | "marking-attendance">("idle");
   const [activeTeacher, setActiveTeacher] = useState<any>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isMounted, setIsMounted] = useState(false);
   const [attendanceCount, setAttendanceCount] = useState(0);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // New States for Leaderboard & Saving
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [leaderboardStats, setLeaderboardStats] = useState<any>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Configuration States
   const [branches, setBranches] = useState<string[]>([]);
@@ -33,12 +40,25 @@ export default function SmartboardPage() {
   
   const [timeLeft, setTimeLeft] = useState(120); // 2 minutes
   const [qrNonce, setQrNonce] = useState(0);
-  const [filterStatus, setFilterStatus] = useState<"all" | "present" | "proxy" | "absent">("all");
+  const [filterStatus, setFilterStatus] = useState<"all" | "present" | "proxy" | "absent" | "pending">("all");
 
   useEffect(() => {
     setIsMounted(true);
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
+    
+    const checkMobile = () => {
+      // Using UserAgent check for mobile phones ONLY. Smartboards might run Android
+      // but usually don't have Mobi. We explicitly do NOT check screen width.
+      const isMobileDevice = /Mobi|iPhone|iPod/i.test(navigator.userAgent);
+      setIsMobile(isMobileDevice);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('resize', checkMobile);
+    };
   }, []);
 
   // Fetch initial configs
@@ -170,15 +190,26 @@ export default function SmartboardPage() {
   // QR Code Refresh & Timer
   useEffect(() => {
     if (status === "marking-attendance") {
-      const qrInterval = setInterval(() => {
-        setQrNonce(prev => prev + 1);
+      const qrInterval = setInterval(async () => {
+        const nextNonce = Math.floor(Math.random() * 1000000);
+        setQrNonce(nextNonce);
+        // Sync nonce to Firestore for security validation
+        if (sessionId) {
+          const sessionRef = doc(db, "smartboardSessions", sessionId);
+          updateDoc(sessionRef, { currentNonce: nextNonce }).catch(e => console.error("Nonce sync failed", e));
+        }
       }, 5000);
       
-      const timerInterval = setInterval(() => {
+      const timerInterval = setInterval(async () => {
         setTimeLeft(prev => {
           if (prev <= 1) {
              clearInterval(timerInterval);
              clearInterval(qrInterval);
+             // Lock session in Firestore
+             if (sessionId) {
+                const sessionRef = doc(db, "smartboardSessions", sessionId);
+                updateDoc(sessionRef, { status: "locked" }).catch(e => console.error("Lock failed", e));
+             }
              return 0;
           }
           return prev - 1;
@@ -211,6 +242,139 @@ export default function SmartboardPage() {
       });
     }
   }, [timeLeft, status]);
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const getStudentStatusColor = (status: string | undefined) => {
+    if (status === 'present') return 'bg-emerald-500/10 border-emerald-500/30 text-emerald-100';
+    if (status === 'proxy') return 'bg-amber-500/10 border-amber-500/30 text-amber-100';
+    if (status === 'absent') return 'bg-rose-500/10 border-rose-500/30 text-rose-100';
+    return 'bg-slate-800/30 border-white/5 text-slate-300';
+  };
+
+  const handleSaveAttendance = async () => {
+    if (!sessionId) return;
+    setIsSaving(true);
+    try {
+      const sessionRef = doc(db, "smartboardSessions", sessionId);
+      await updateDoc(sessionRef, {
+        status: 'completed',
+        finalizedAt: serverTimestamp(),
+        presentCount: Object.values(attendanceData).filter(a => a.status === 'present').length,
+        proxyCount: Object.values(attendanceData).filter(a => a.status === 'proxy').length,
+        absentCount: filteredStudents.length - Object.values(attendanceData).length,
+      });
+
+      // Save structured data for Leaderboard
+      const dateStr = new Date().toLocaleDateString("en-IN").replace(/\//g, "-");
+      const cleanBranch = selectedBranch.replace(/\s+/g, '_');
+      const cleanSem = selectedSemester.replace(/\s+/g, '_');
+      const cleanSub = selectedSubject.replace(/\s+/g, '_');
+      
+      const leaderboardDocRef = doc(db, "SubjectAttendance", `${cleanBranch}_${cleanSem}_${cleanSub}`);
+      await setDoc(leaderboardDocRef, { subject: selectedSubject, branch: selectedBranch, semester: selectedSemester }, { merge: true });
+      
+      const dateDocRef = doc(collection(leaderboardDocRef, "dates"), dateStr);
+      
+      // Build attendance map by regNo
+      const finalAttendanceMap: Record<string, string> = {};
+      filteredStudents.forEach(student => {
+         if (!student.regNo) return;
+         // Status might be from attendanceData, or default to absent
+         const st = attendanceData[student.id]?.status || 'absent';
+         finalAttendanceMap[student.regNo] = st;
+      });
+
+      await setDoc(dateDocRef, {
+         teacherName: activeTeacher || "Professor",
+         date: dateStr,
+         attendance: finalAttendanceMap,
+         timestamp: serverTimestamp()
+      }, { merge: true });
+
+      alert("Attendance records finalized and saved to database!");
+    } catch (err) {
+      console.error("Save error:", err);
+      alert("Failed to save records.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleRestartAttendance = async () => {
+    if (confirm("Reset and start attendance again? This will wipe the current session data.")) {
+      if (sessionId) {
+        // Delete current session
+        await deleteDoc(doc(db, "smartboardSessions", sessionId));
+        // Delete any attendance marked in this session
+        const attQuery = query(collection(db, "attendance"), where("sessionId", "==", sessionId));
+        const snap = await getDocs(attQuery);
+        
+        // Wait for all deletions to finish
+        await Promise.all(snap.docs.map(d => deleteDoc(doc(db, "attendance", d.id))));
+      }
+      
+      // True state reset
+      window.location.reload();
+    }
+  };
+
+  const toggleLeaderboard = async () => {
+    if (!showLeaderboard) {
+      try {
+        const cleanBranch = selectedBranch.replace(/\s+/g, '_');
+        const cleanSem = selectedSemester.replace(/\s+/g, '_');
+        const cleanSub = selectedSubject.replace(/\s+/g, '_');
+        
+        const datesColRef = collection(db, "SubjectAttendance", `${cleanBranch}_${cleanSem}_${cleanSub}`, "dates");
+        const datesSnap = await getDocs(datesColRef);
+        
+        const totalSessions = datesSnap.size;
+        if (totalSessions > 0) {
+           const stats: any = {};
+           
+           // Pre-fill stats for all filtered students to ensure they show up even if 0 present
+           filteredStudents.forEach(student => {
+              if (student.regNo) {
+                 stats[student.regNo] = { present: 0, total: totalSessions, name: student.name, id: student.id };
+              }
+           });
+
+           datesSnap.docs.forEach(doc => {
+              const data = doc.data();
+              if (data.attendance) {
+                 Object.entries(data.attendance).forEach(([regNo, status]) => {
+                    if (stats[regNo]) {
+                       if (status === 'present') {
+                          stats[regNo].present += 1;
+                       }
+                    }
+                 });
+              }
+           });
+           
+           // Calculate percentages
+           const finalStats: any = {};
+           Object.keys(stats).forEach(regNo => {
+              const s = stats[regNo];
+              const percentage = s.total > 0 ? Math.round((s.present / s.total) * 100) : 0;
+              finalStats[regNo] = { ...s, percentage };
+           });
+           
+           setLeaderboardStats(finalStats);
+        } else {
+           setLeaderboardStats(null);
+        }
+      } catch (err) {
+        console.error("Leaderboard fetch error:", err);
+      }
+    }
+    setShowLeaderboard(!showLeaderboard);
+  };
 
   const handleStartAttendance = async () => {
     if (sessionId) {
@@ -250,22 +414,7 @@ export default function SmartboardPage() {
     }, { merge: true });
   };
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
 
-  const getStudentStatusColor = (status?: string) => {
-    if (timeLeft > 0 && !status) return "bg-slate-900 border-slate-800 text-slate-400";
-    if (timeLeft === 0 && !status) return "bg-rose-950/30 border-rose-900/50 text-rose-500"; // absent
-    
-    if (status === 'present') return "bg-emerald-950/40 border-emerald-500/50 text-emerald-400";
-    if (status === 'proxy') return "bg-amber-950/40 border-amber-500/50 text-amber-400";
-    if (status === 'absent') return "bg-rose-950/30 border-rose-900/50 text-rose-500";
-    
-    return "bg-slate-900 border-slate-800 text-slate-400";
-  };
 
   return (
     <div className="min-h-screen bg-[#020617] text-slate-200 flex flex-col items-center justify-center p-4 sm:p-6 md:p-8 overflow-x-hidden selection:bg-blue-500/30">
@@ -276,8 +425,8 @@ export default function SmartboardPage() {
       </div>
 
       {/* Header Area */}
-      <header className="fixed top-0 inset-x-0 h-16 sm:h-20 flex items-center justify-between px-4 sm:px-10 glass-header z-50">
-        <div className="flex items-center gap-3 sm:gap-4">
+      <header className="fixed top-0 inset-x-0 h-16 sm:h-20 flex items-center justify-between px-4 sm:px-10 glass-header z-50 overflow-hidden">
+        <div className="flex items-center gap-3 sm:gap-4 relative z-10">
           <div className="w-8 h-8 sm:w-10 sm:h-10 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-900/40 border border-blue-400/20">
             <Monitor size={18} className="text-white sm:hidden" />
             <Monitor size={22} className="text-white hidden sm:block" />
@@ -288,8 +437,9 @@ export default function SmartboardPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 sm:gap-6">
-          <div className="text-right hidden xs:block">
+        {/* Right Info */}
+        <div className="flex items-center gap-3 sm:gap-6 relative z-10">
+          <div className="text-right hidden md:block">
              <p className="text-xs sm:text-sm font-black text-white font-mono">
                {isMounted ? currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : "--:--:--"}
              </p>
@@ -297,7 +447,7 @@ export default function SmartboardPage() {
                {isMounted ? currentTime.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : "Loading..."}
              </p>
           </div>
-          <div className="h-8 sm:h-10 w-[1px] bg-slate-800 hidden xs:block"></div>
+          <div className="h-8 sm:h-10 w-[1px] bg-slate-800 hidden sm:block"></div>
           <div className="bg-slate-900/50 border border-slate-800 px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg flex items-center gap-2 sm:gap-3">
              <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-blue-500 animate-pulse"></div>
              <span className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">{sessionId || "---"}</span>
@@ -306,7 +456,7 @@ export default function SmartboardPage() {
       </header>
 
       {/* Main Content */}
-      <main className="relative z-10 w-full flex-1 flex flex-col items-center justify-center mt-20 mb-10">
+      <main className="relative z-10 w-full flex-1 flex flex-col items-center justify-center mt-16 sm:mt-20 mb-4">
         {status === "waiting" && (
           <div className="flex flex-col lg:flex-row items-center justify-center gap-8 sm:gap-12 lg:gap-16 animate-in fade-in slide-in-from-bottom-8 duration-1000">
             {/* QR Section */}
@@ -420,16 +570,16 @@ export default function SmartboardPage() {
         )}
 
         {status === "marking-attendance" && (
-          <div className="flex flex-col lg:flex-row gap-6 w-full max-w-[1400px] animate-in fade-in duration-700 px-2 sm:px-4 h-[calc(100vh-160px)]">
+          <div className="flex flex-col lg:flex-row gap-4 w-full max-w-[1600px] animate-in fade-in duration-700 px-2 sm:px-6 h-[calc(100vh-140px)] overflow-hidden">
              {/* Left Area: Student Grid */}
              <div className="flex-1 card-premium p-4 sm:p-6 flex flex-col overflow-hidden relative">
                 <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none">
                    <LayoutGrid size={200} />
                 </div>
-                <div className="flex items-center justify-between mb-6 relative z-10">
+                <div className="flex items-center justify-between mb-4 relative z-10">
                    <div>
-                      <h3 className="text-xl sm:text-2xl font-black text-white">{selectedSubject}</h3>
-                      <p className="text-xs text-slate-400 uppercase tracking-widest">{selectedBranch} • {selectedSemester} • {selectedRoom}</p>
+                      <h3 className="text-lg sm:text-xl font-black text-white">{selectedSubject}</h3>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-widest">{selectedBranch} • {selectedSemester} • {selectedRoom}</p>
                    </div>
                    <div className="flex gap-4">
                       <div className="text-center">
@@ -458,7 +608,7 @@ export default function SmartboardPage() {
                    </div>
                 )}
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 overflow-y-auto pr-2 custom-scrollbar flex-1 content-start relative z-10 pb-10">
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-2 overflow-y-auto pr-2 custom-scrollbar flex-1 content-start relative z-10 pb-10">
                    {filteredStudents
                      .filter(s => {
                         if (filterStatus === "all") return true;
@@ -472,22 +622,22 @@ export default function SmartboardPage() {
                        const colorClass = getStudentStatusColor(finalStatus);
                        
                        return (
-                         <div 
-                            key={student.id} 
-                            onClick={() => handleManualOverride(student.id, finalStatus || 'pending')}
-                            className={`p-3 rounded-lg border ${colorClass} ${timeLeft === 0 ? 'cursor-pointer hover:scale-105 shadow-xl' : 'cursor-default'} transition-all flex flex-col justify-between aspect-[4/3] backdrop-blur-sm`}
-                         >
-                            <p className="text-xs font-bold truncate text-white">{student.name}</p>
-                            <div className="flex items-end justify-between mt-2">
-                               <p className="text-xs font-black opacity-60 font-mono">
-                                 {student.regNo ? student.regNo.slice(-4) : String(idx+1).padStart(2, '0')}
-                               </p>
-                               {finalStatus === 'present' && <CheckCircle size={16} className="text-emerald-400" />}
-                               {finalStatus === 'proxy' && <AlertCircle size={16} className="text-amber-400" />}
-                               {finalStatus === 'absent' && <XCircle size={16} className="text-rose-500" />}
-                            </div>
-                         </div>
-                       );
+                          <div 
+                             key={student.id} 
+                             onClick={() => handleManualOverride(student.id, finalStatus || 'pending')}
+                             className={`p-2 sm:p-3 rounded-lg border ${colorClass} ${timeLeft === 0 ? 'cursor-pointer hover:scale-105 shadow-xl' : 'cursor-default'} transition-all flex flex-col justify-between aspect-[4/3] backdrop-blur-sm overflow-hidden`}
+                          >
+                             <p className="text-[10px] sm:text-xs font-bold truncate text-white leading-tight">{student.name}</p>
+                             <div className="flex items-end justify-between mt-1">
+                                <p className="text-[9px] sm:text-xs font-black opacity-60 font-mono">
+                                  {student.regNo ? student.regNo.slice(-4) : String(idx+1).padStart(2, '0')}
+                                </p>
+                                {finalStatus === 'present' && <CheckCircle size={14} className="text-emerald-400" />}
+                                {finalStatus === 'proxy' && <AlertCircle size={14} className="text-amber-400" />}
+                                {finalStatus === 'absent' && <XCircle size={14} className="text-rose-500" />}
+                             </div>
+                          </div>
+                        );
                     })}
                    
                    {filteredStudents.length === 0 && (
@@ -498,70 +648,144 @@ export default function SmartboardPage() {
                 </div>
              </div>
 
-             {/* Right Area: QR & Stats */}
-             <div className="w-full lg:w-[340px] flex flex-col gap-6">
-                <div className="card-premium p-6 flex flex-col items-center relative overflow-hidden">
-                   <div className="absolute top-0 right-0 p-4 opacity-5">
+             {/* Right Area: QR, Timer & Stats */}
+             <div className="w-full lg:w-[320px] flex flex-col gap-4 overflow-y-auto custom-scrollbar pr-1 relative z-10">
+                {/* QR Code & Timer Card */}
+                <div className="card-premium p-4 flex flex-col items-center relative overflow-hidden flex-shrink-0">
+                   <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
                       <Clock size={100} />
                    </div>
-                   <h3 className="text-sm font-black text-white uppercase tracking-widest mb-4 relative z-10">QR Session <span className="text-blue-500">{new Date().toLocaleDateString()}</span></h3>
                    
-                   <div className="bg-white p-4 rounded-xl shadow-2xl w-full max-w-[240px] mb-6 relative z-10 ring-4 ring-white/10">
-                      <QRCode value={`ATTENDANCE:${sessionId}:${qrNonce}`} style={{ height: "auto", maxWidth: "100%", width: "100%" }} level="H" />
+                   <div className="flex justify-between items-center w-full mb-4 relative z-10">
+                      <h3 className="text-xs font-black text-white uppercase tracking-widest">Attendance QR</h3>
+                      <div className="flex items-center gap-1.5 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
+                         <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
+                         <span className="text-[9px] font-black text-blue-400 uppercase tracking-tighter">Live</span>
+                      </div>
+                   </div>
+                   
+                   {/* QR Container - Responsive & Fixed Aspect */}
+                   <div className="bg-white p-3 rounded-xl shadow-[0_0_50px_rgba(255,255,255,0.1)] w-full aspect-square max-w-[220px] mb-3 relative z-10 ring-1 ring-white/10 flex items-center justify-center overflow-hidden">
+                      <div className={`w-full h-full flex items-center justify-center transition-all duration-500 ${timeLeft === 0 ? 'blur-md grayscale opacity-50 scale-95' : ''}`}>
+                        <QRCode 
+                          value={timeLeft > 0 ? `ATTENDANCE:${sessionId}:${qrNonce}` : `EXPIRED_SESSION:${sessionId}`}
+                          style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                          level="M"
+                        />
+                      </div>
                       {timeLeft === 0 && (
-                         <div className="absolute inset-0 bg-white/90 backdrop-blur-sm flex items-center justify-center rounded-xl">
-                            <p className="text-rose-600 font-black uppercase tracking-widest text-lg border-4 border-rose-600 px-4 py-2 rounded-lg rotate-[-10deg]">Locked</p>
+                         <div className="absolute inset-0 flex flex-col items-center justify-center z-20 pointer-events-none">
+                            <div className="bg-rose-600/90 text-white px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest shadow-lg transform -rotate-12 border border-white/20">
+                               EXPIRED
+                            </div>
                          </div>
                       )}
                    </div>
-                   
-                   <p className="text-[9px] text-slate-500 font-mono mb-4 text-center break-all relative z-10">
-                      Session ID: {sessionId}
-                   </p>
-                   
-                   <div className="flex flex-col items-center relative z-10">
-                       <p className={`text-[10px] font-black uppercase tracking-[0.3em] mb-2 ${timeLeft === 0 ? 'text-rose-500' : 'text-slate-500'}`}>
-                          {timeLeft === 0 ? 'Session Expired' : 'Time Remaining'}
-                       </p>
-                       <div className={`text-6xl font-black font-mono tracking-tighter ${timeLeft === 0 ? 'text-rose-500' : 'text-blue-400 drop-shadow-[0_0_20px_rgba(59,130,246,0.6)]'}`}>
-                          {formatTime(timeLeft)}
-                       </div>
-                       {timeLeft === 0 && <p className="text-[10px] text-rose-400 mt-2 uppercase tracking-widest font-bold animate-pulse">Manual override active</p>}
+
+                   {/* Timer Box - Reduced size as requested */}
+                   <div className="w-fit mx-auto bg-amber-500/5 border border-amber-500/10 py-2 px-6 rounded-xl text-center relative z-10">
+                      <p className="text-[8px] font-black text-amber-500/60 uppercase tracking-[0.2em] mb-1">Time Remaining</p>
+                      <div className={`text-lg font-black font-mono tracking-widest ${timeLeft < 30 ? 'text-rose-500 animate-pulse' : 'text-amber-400'}`}>
+                         {timeLeft > 0 ? formatTime(timeLeft) : "LOCKED"}
+                      </div>
+                   </div>
+                </div>
+
+                <div className="card-premium p-4 space-y-2">
+                    <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 border-b border-white/5 pb-2">Control Panel</h3>
+                    
+                    <div className="grid grid-cols-2 gap-2">
+                       <button 
+                          onClick={handleSaveAttendance}
+                          disabled={isSaving}
+                          className="flex flex-col items-center justify-center gap-1 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all group"
+                       >
+                          <Save size={18} className="text-emerald-400 group-hover:scale-110 transition-transform" />
+                          <span className="text-[8px] font-black text-emerald-500 uppercase">Save</span>
+                       </button>
+                       
+                       <button 
+                          onClick={handleRestartAttendance}
+                          className="flex flex-col items-center justify-center gap-1 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 transition-all group"
+                       >
+                          <RefreshCw size={18} className="text-amber-400 group-hover:rotate-180 transition-transform duration-500" />
+                          <span className="text-[8px] font-black text-amber-500 uppercase">Restart</span>
+                       </button>
+
+                       <button 
+                          onClick={toggleLeaderboard}
+                          className={`col-span-2 flex items-center justify-center gap-2 p-2 rounded-xl border transition-all ${showLeaderboard ? 'bg-indigo-600 border-indigo-400 shadow-[0_0_20px_rgba(79,70,229,0.4)]' : 'bg-slate-900/50 border-white/5 hover:bg-white/5'}`}
+                       >
+                          <Trophy size={14} className={showLeaderboard ? 'text-white' : 'text-indigo-400'} />
+                          <span className={`text-[9px] font-black uppercase tracking-widest ${showLeaderboard ? 'text-white' : 'text-slate-400'}`}>
+                             {showLeaderboard ? 'Hide Leaderboard' : 'Show Leaderboard'}
+                          </span>
+                       </button>
                     </div>
                 </div>
 
-                 <div className="card-premium p-5 space-y-4">
-                    <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-white/5 pb-2">Status Legend</h4>
+                {/* Filter Controls */}
+                <div className="card-premium p-4 space-y-2">
+                    <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 border-b border-white/5 pb-2">Filter Board</h3>
+                    
                     <button 
                        onClick={() => setFilterStatus("present")}
-                       className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${filterStatus === 'present' ? 'bg-emerald-500/20 border border-emerald-500/50 ring-2 ring-emerald-500/20' : 'hover:bg-white/5 border border-transparent'}`}
+                       className={`w-full flex items-center justify-between p-2 rounded-lg transition-all border ${filterStatus === 'present' ? 'bg-emerald-500/20 border-emerald-500/50 ring-2 ring-emerald-500/20' : 'bg-slate-900/50 border-white/5 hover:bg-white/5'}`}
                     >
-                       <div className="w-3 h-3 rounded bg-emerald-500 flex-shrink-0 shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
-                       <p className="text-xs text-slate-300 font-black uppercase tracking-widest">Present</p>
+                       <div className="flex items-center gap-3">
+                          <div className="w-2.5 h-2.5 rounded bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
+                          <p className="text-[10px] text-slate-300 font-black uppercase tracking-widest">Present</p>
+                       </div>
+                       <span className="text-[10px] font-black text-emerald-400">{Object.values(attendanceData).filter(a => a.status === 'present').length}</span>
                     </button>
                     
                     <button 
                        onClick={() => setFilterStatus("proxy")}
-                       className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${filterStatus === 'proxy' ? 'bg-amber-500/20 border border-amber-500/50 ring-2 ring-amber-500/20' : 'hover:bg-white/5 border border-transparent'}`}
+                       className={`w-full flex items-center justify-between p-2 rounded-lg transition-all border ${filterStatus === 'proxy' ? 'bg-amber-500/20 border-amber-500/50 ring-2 ring-amber-500/20' : 'bg-slate-900/50 border-white/5 hover:bg-white/5'}`}
                     >
-                       <div className="w-3 h-3 rounded bg-amber-500 flex-shrink-0 shadow-[0_0_10px_rgba(245,158,11,0.5)]"></div>
-                       <p className="text-xs text-slate-300 font-black uppercase tracking-widest">Suspected Proxy</p>
+                       <div className="flex items-center gap-3">
+                          <div className="w-2.5 h-2.5 rounded bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]"></div>
+                          <p className="text-[10px] text-slate-300 font-black uppercase tracking-widest">Proxy</p>
+                       </div>
+                       <span className="text-[10px] font-black text-amber-400">{Object.values(attendanceData).filter(a => a.status === 'proxy').length}</span>
                     </button>
                     
                     <button 
                        onClick={() => setFilterStatus("absent")}
-                       className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${filterStatus === 'absent' ? 'bg-rose-500/20 border border-rose-500/50 ring-2 ring-rose-500/20' : 'hover:bg-white/5 border border-transparent'}`}
+                       className={`w-full flex items-center justify-between p-2 rounded-lg transition-all border ${filterStatus === 'absent' ? 'bg-rose-500/20 border-rose-500/50 ring-2 ring-rose-500/20' : 'bg-slate-900/50 border-white/5 hover:bg-white/5'}`}
                     >
-                       <div className="w-3 h-3 rounded bg-rose-500 flex-shrink-0 shadow-[0_0_10px_rgba(244,63,94,0.5)]"></div>
-                       <p className="text-xs text-slate-300 font-black uppercase tracking-widest">Absent / Rejected</p>
+                       <div className="flex items-center gap-3">
+                          <div className="w-2.5 h-2.5 rounded bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]"></div>
+                          <p className="text-[10px] text-slate-300 font-black uppercase tracking-widest">Absent</p>
+                       </div>
+                       <span className="text-[10px] font-black text-rose-400">{Object.values(attendanceData).filter(a => a.status === 'absent').length}</span>
+                    </button>
+
+                    <button 
+                       onClick={() => setFilterStatus("all")}
+                       className={`w-full flex items-center justify-between p-2 rounded-lg transition-all border ${filterStatus === 'all' ? 'bg-indigo-500/20 border-indigo-500/50 ring-2 ring-indigo-500/20' : 'bg-slate-900/50 border-white/5 hover:bg-white/5'}`}
+                    >
+                       <div className="flex items-center gap-3">
+                          <div className="w-2.5 h-2.5 rounded bg-indigo-500"></div>
+                          <p className="text-[10px] text-slate-300 font-black uppercase tracking-widest">All Students</p>
+                       </div>
+                       <span className="text-[10px] font-black text-slate-400">{filteredStudents.length}</span>
                     </button>
                     
                     <button 
-                       onClick={() => setFilterStatus("all")}
-                       className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${filterStatus === 'all' ? 'bg-blue-500/20 border border-blue-500/50 ring-2 ring-blue-500/20' : 'hover:bg-white/5 border border-transparent'}`}
+                       onClick={() => setFilterStatus("pending")}
+                       className={`w-full flex items-center justify-between p-2 rounded-lg transition-all border ${filterStatus === 'pending' ? 'bg-slate-500/20 border-slate-500/50 ring-2 ring-slate-500/20' : 'bg-slate-900/50 border-white/5 hover:bg-white/5'}`}
                     >
-                       <div className="w-3 h-3 rounded bg-slate-500 flex-shrink-0"></div>
-                       <p className="text-xs text-slate-300 font-black uppercase tracking-widest">Pending / All</p>
+                       <div className="flex items-center gap-3">
+                          <div className="w-2.5 h-2.5 rounded bg-slate-500"></div>
+                          <p className="text-[10px] text-slate-300 font-black uppercase tracking-widest">Pending</p>
+                       </div>
+                       <span className="text-[10px] font-black text-slate-400">
+                          {filteredStudents.filter(s => {
+                             const st = attendanceData[s.id]?.status || (timeLeft === 0 ? 'absent' : 'pending');
+                             return st === 'pending';
+                          }).length}
+                       </span>
                     </button>
                  </div>
              </div>
@@ -569,10 +793,116 @@ export default function SmartboardPage() {
         )}
       </main>
 
+      {/* Leaderboard Overlay */}
+      {showLeaderboard && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md animate-in fade-in zoom-in duration-300">
+           <div className="w-full max-w-4xl bg-slate-900 rounded-3xl border border-white/10 shadow-[0_0_100px_rgba(0,0,0,0.5)] flex flex-col max-h-[80vh] overflow-hidden">
+              <div className="p-6 border-b border-white/5 flex items-center justify-between bg-indigo-600/10">
+                 <div className="flex items-center gap-4">
+                    <div className="p-3 bg-indigo-500/20 rounded-2xl border border-indigo-500/30">
+                       <Trophy size={24} className="text-indigo-400" />
+                    </div>
+                    <div>
+                       <h2 className="text-xl font-black text-white uppercase tracking-widest">Subject Leaderboard</h2>
+                       <p className="text-xs text-indigo-400 font-bold uppercase">{selectedSubject} • Cumulative Performance</p>
+                    </div>
+                 </div>
+                 <button onClick={() => setShowLeaderboard(false)} className="p-2 hover:bg-white/10 rounded-full transition-all">
+                    <XCircle size={24} className="text-slate-400" />
+                 </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {leaderboardStats && Object.values(leaderboardStats)
+                      .sort((a: any, b: any) => b.percentage - a.percentage)
+                      .map((stat: any, index: number) => (
+                         <div key={stat.id} className="bg-slate-950/50 border border-white/5 p-4 rounded-2xl flex items-center gap-4 group hover:border-indigo-500/30 transition-all">
+                            <div className="w-8 text-center">
+                               <span className={`text-lg font-black ${index < 3 ? 'text-amber-400' : 'text-slate-600'}`}>#{index + 1}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                               <p className="text-sm font-black text-white truncate">{stat.name}</p>
+                               <div className="flex items-center gap-2 mt-1">
+                                  <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                     <div 
+                                        className={`h-full rounded-full transition-all duration-1000 ${
+                                           stat.percentage > 75 ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]' : 
+                                           stat.percentage > 50 ? 'bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.4)]' : 
+                                           'bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.4)]'
+                                        }`}
+                                        style={{ width: `${stat.percentage}%` }}
+                                     ></div>
+                                  </div>
+                                  <span className="text-[10px] font-black font-mono text-slate-400">{stat.percentage}%</span>
+                                </div>
+                               <p className="text-[9px] text-slate-500 font-bold uppercase mt-1">
+                                  {stat.present} Present / {stat.total} Total
+                               </p>
+                            </div>
+                         </div>
+                      ))
+                    }
+                    {(!leaderboardStats || Object.keys(leaderboardStats).length === 0) && (
+                       <div className="col-span-full py-20 text-center">
+                          <p className="text-slate-500 font-bold uppercase tracking-widest">No historical data available for this subject.</p>
+                       </div>
+                    )}
+                 </div>
+              </div>
+              
+              <div className="p-4 bg-slate-950/50 border-t border-white/5 text-center">
+                 <p className="text-[9px] text-slate-600 font-black uppercase tracking-[0.2em]">Data synchronized with Firestore Realtime</p>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* Mobile Restriction Overlay */}
+      {isMobile && (
+        <div className="fixed inset-0 z-[100] bg-[#020617] flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-500">
+           <div className="w-20 h-20 bg-rose-500/10 rounded-2xl border-2 border-rose-500/20 flex items-center justify-center mb-6 shadow-[0_0_60px_rgba(244,63,94,0.1)]">
+              <Monitor size={40} className="text-rose-500" />
+           </div>
+           <h2 className="text-2xl font-black text-white tracking-tighter uppercase mb-4">Desktop Access Only</h2>
+           <p className="text-slate-400 font-medium text-sm leading-relaxed max-w-xs">
+              This Smartboard interface is optimized for large displays. <br />
+              <span className="text-white font-bold italic">Small screens are not supported for this view.</span>
+           </p>
+           <div className="mt-10 p-4 border border-white/5 rounded-xl bg-white/5">
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Device requirement</p>
+              <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">Minimum Resolution: 1024px Width</p>
+           </div>
+        </div>
+      )}
+
       {/* Footer Branding */}
       <footer className="fixed bottom-4 sm:bottom-6 text-center px-4 w-full pointer-events-none z-0">
          <p className="text-[7px] sm:text-[10px] font-black text-slate-700 uppercase tracking-[0.2em] sm:tracking-[0.4em]">Academic Ledger System v2.0</p>
       </footer>
+      {/* Mobile Block Overlay */}
+      {isMobile && (
+         <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl animate-in fade-in duration-300">
+            <div className="max-w-md w-full bg-slate-900 border border-rose-500/20 p-8 rounded-3xl text-center shadow-[0_0_50px_rgba(244,63,94,0.1)] relative overflow-hidden">
+               <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none">
+                  <Monitor size={150} />
+               </div>
+               <div className="relative z-10">
+                   <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-6 border border-rose-500/20">
+                      <Monitor size={32} />
+                   </div>
+                   <h2 className="text-xl font-black text-white uppercase tracking-widest mb-3">Desktop Required</h2>
+                   <p className="text-xs text-slate-400 font-medium mb-8 leading-relaxed">
+                      This website is not meant for mobile devices. The Smartboard interface is strictly designed for Desktop and Smartboard displays.
+                   </p>
+                   <button onClick={() => router.push('/dashboard')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all">
+                      Return to Dashboard
+                   </button>
+               </div>
+            </div>
+         </div>
+      )}
+
     </div>
   );
 }
