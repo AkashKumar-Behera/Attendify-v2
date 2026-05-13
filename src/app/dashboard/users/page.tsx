@@ -195,11 +195,35 @@ export default function ManageUsersPage() {
   };
 
   const resolveStudentMeta = (u: any) => {
-    if (u.role === 'teacher') return { branch: u.branch || "Faculty", semester: "N/A" };
-    if (!u.regNo) return { branch: "N/A", semester: "N/A" };
+    if (u.role === 'teacher') return { branch: u.branch || "Faculty", semester: "N/A", section: "N/A", group: "N/A" };
+    if (!u.regNo) return { branch: "N/A", semester: "N/A", section: "N/A", group: "N/A" };
     const prefix = u.regNo.substring(0, 8);
     const mapping = mappings.find(m => m.prefix === prefix);
-    return mapping ? { branch: mapping.branch, semester: mapping.semester } : { branch: "Unmapped", semester: "Unmapped" };
+    
+    let sectionMatch = "N/A";
+    let groupMatch = "N/A";
+    
+    if (mapping && mapping.sections) {
+       const numericSuffix = parseInt(u.regNo.substring(8), 10);
+       if (!isNaN(numericSuffix)) {
+          for (const sec of mapping.sections) {
+             if (numericSuffix >= sec.startRoll && numericSuffix <= sec.endRoll) {
+                sectionMatch = sec.name;
+                if (sec.groups) {
+                   for (const grp of sec.groups) {
+                      if (numericSuffix >= grp.startRoll && numericSuffix <= grp.endRoll) {
+                         groupMatch = grp.name;
+                         break;
+                      }
+                   }
+                }
+                break;
+             }
+          }
+       }
+    }
+
+    return mapping ? { branch: mapping.branch, semester: mapping.semester, section: sectionMatch, group: groupMatch } : { branch: "Unmapped", semester: "Unmapped", section: "N/A", group: "N/A" };
   };
 
   const filteredUsers = users.filter(u => {
@@ -655,21 +679,70 @@ export default function ManageUsersPage() {
                                     <label className="text-xs font-medium text-slate-400">Email</label>
                                     <input 
                                         value={editData.email}
-                                        onChange={e => setEditData({...editData, email: e.target.value})}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-blue-500 transition-all"
+                                        readOnly
+                                        className="w-full bg-slate-950/50 border border-slate-800/50 rounded-lg px-4 py-3 text-sm text-slate-500 outline-none cursor-not-allowed"
                                     />
                                 </div>
                                 <div className="space-y-2">
                                     <label className="text-xs font-medium text-slate-400">Branch</label>
                                     <select 
                                         value={editData.branch}
-                                        onChange={e => setEditData({...editData, branch: e.target.value})}
+                                        onChange={e => {
+                                            const newBranch = e.target.value;
+                                            const currentSem = resolveStudentMeta(editData).semester;
+                                            const map = mappings.find(m => m.branch === newBranch && m.semester === currentSem);
+                                            if (map && editData.regNo && editData.regNo.length >= 8) {
+                                                const suffix = editData.regNo.substring(8);
+                                                setEditData({...editData, branch: newBranch, regNo: map.prefix + suffix});
+                                            } else {
+                                                setEditData({...editData, branch: newBranch});
+                                            }
+                                        }}
                                         className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-blue-500 transition-all appearance-none"
                                     >
                                         {branches.map(b => <option key={`edit-branch-${b}`} value={b}>{b}</option>)}
                                     </select>
                                 </div>
                             </div>
+                            {editData.role === 'student' && (
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium text-slate-400">Semester</label>
+                                        <select 
+                                            value={resolveStudentMeta(editData).semester}
+                                            onChange={e => {
+                                            const newSem = e.target.value;
+                                            const branch = editData.branch || resolveStudentMeta(editData).branch;
+                                            const map = mappings.find(m => m.branch === branch && m.semester === newSem);
+                                            if (map && editData.regNo && editData.regNo.length >= 8) {
+                                                const suffix = editData.regNo.substring(8);
+                                                setEditData({...editData, regNo: map.prefix + suffix});
+                                            }
+                                            }}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-blue-500 transition-all appearance-none"
+                                        >
+                                            <option value="Unmapped">Select Semester</option>
+                                            {semesters.map(s => <option key={`edit-sem-${s}`} value={s}>{s}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium text-slate-400">Section</label>
+                                        <input 
+                                            value={resolveStudentMeta(editData).section}
+                                            readOnly
+                                            className="w-full bg-slate-950/50 border border-slate-800/50 rounded-lg px-4 py-3 text-sm text-slate-500 outline-none cursor-not-allowed"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium text-slate-400">Group</label>
+                                        <input 
+                                            value={resolveStudentMeta(editData).group}
+                                            readOnly
+                                            className="w-full bg-slate-950/50 border border-slate-800/50 rounded-lg px-4 py-3 text-sm text-slate-500 outline-none cursor-not-allowed"
+                                        />
+                                    </div>
+                                </div>
+                            )}
                             <div className="flex gap-4 pt-4">
                                 <button 
                                     onClick={handleUpdateUser}
@@ -700,6 +773,22 @@ export default function ManageUsersPage() {
                                     <p className="text-xs font-medium text-slate-500">Branch</p>
                                     <p className="text-sm font-semibold text-indigo-400">{resolveStudentMeta(selectedUser).branch}</p>
                                 </div>
+                                {selectedUser?.role === 'student' && (
+                                    <>
+                                        <div className="p-4 md:p-6 bg-slate-950/50 border border-slate-800/50 rounded-lg space-y-1">
+                                            <p className="text-xs font-medium text-slate-500">Semester</p>
+                                            <p className="text-sm font-semibold text-slate-300">{resolveStudentMeta(selectedUser).semester}</p>
+                                        </div>
+                                        <div className="p-4 md:p-6 bg-slate-950/50 border border-slate-800/50 rounded-lg space-y-1">
+                                            <p className="text-xs font-medium text-slate-500">Section</p>
+                                            <p className="text-sm font-semibold text-slate-300">{resolveStudentMeta(selectedUser).section}</p>
+                                        </div>
+                                        <div className="p-4 md:p-6 bg-slate-950/50 border border-slate-800/50 rounded-lg space-y-1">
+                                            <p className="text-xs font-medium text-slate-500">Group</p>
+                                            <p className="text-sm font-semibold text-slate-300">{resolveStudentMeta(selectedUser).group}</p>
+                                        </div>
+                                    </>
+                                )}
                             </div>
 
                             <div className="flex flex-col sm:flex-row gap-4">

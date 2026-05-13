@@ -20,6 +20,7 @@ export default function HistoryPage() {
   const { userData } = useAuth();
   
   const [teacherClasses, setTeacherClasses] = useState<any[]>([]);
+  const [validDates, setValidDates] = useState<any[]>([]);
   const [branches, setBranches] = useState<string[]>([]);
   const [semesters, setSemesters] = useState<string[]>([]);
   const [subjects, setSubjects] = useState<string[]>([]);
@@ -130,16 +131,21 @@ export default function HistoryPage() {
       });
 
       setTotalClasses(validDates.length);
+      setValidDates(validDates);
 
       // 4. Aggregate Data
       const records = filteredStudents.map(student => {
         let presentCount = 0;
         let absentCount = 0;
+        const history: Record<string, string> = {};
         
         validDates.forEach(dateRecord => {
           const status = dateRecord.attendance[student.regNo];
           if (status === 'present') presentCount++;
           else absentCount++; // Treat unrecorded as absent if date exists
+          
+          const key = dateRecord.timeslot ? `${dateRecord.date} (${dateRecord.timeslot})` : dateRecord.date;
+          history[key] = status === 'present' ? 'P' : 'A';
         });
 
         const total = presentCount + absentCount;
@@ -151,7 +157,8 @@ export default function HistoryPage() {
           email: student.email,
           present: presentCount,
           absent: absentCount,
-          avg: avg
+          avg: avg,
+          history: history
         };
       });
 
@@ -170,20 +177,23 @@ export default function HistoryPage() {
   const exportToCSV = () => {
     if (attendanceRecords.length === 0) return;
     
-    const headers = ["Sl No", "Student Regd No", "Name", "Subject", "Present", "Absent", "Avg %", "Date Range", "Student Email"];
-    const dateRange = `Last ${totalClasses} Classes (30 Days)`;
+    const dateHeaders = validDates.map(d => d.timeslot ? `${d.date} (${d.timeslot})` : d.date);
+    const headers = ["Sl No", "Student Regd No", "Name", "Subject", "Present", "Absent", "Avg %", ...dateHeaders, "Student Email"];
     
-    const rows = attendanceRecords.map((rec, idx) => [
-      idx + 1,
-      rec.regNo,
-      `"${rec.name}"`, // Quote to handle commas
-      `"${selectedSubject}"`,
-      rec.present,
-      rec.absent,
-      `${rec.avg}%`,
-      `"${dateRange}"`,
-      rec.email
-    ]);
+    const rows = attendanceRecords.map((rec, idx) => {
+      const dateValues = dateHeaders.map(h => rec.history[h] || 'A');
+      return [
+        idx + 1,
+        rec.regNo,
+        `"${rec.name}"`, // Quote to handle commas
+        `"${selectedSubject}"`,
+        rec.present,
+        rec.absent,
+        `${rec.avg}%`,
+        ...dateValues,
+        rec.email
+      ];
+    });
 
     const csvContent = [
       headers.join(","),

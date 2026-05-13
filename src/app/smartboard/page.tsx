@@ -31,6 +31,9 @@ export default function SmartboardPage() {
   const [selectedSemester, setSelectedSemester] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("");
   const [selectedRoom, setSelectedRoom] = useState("");
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState("");
+  const [selectedSection, setSelectedSection] = useState("");
+  const [selectedGroup, setSelectedGroup] = useState("");
 
   const [students, setStudents] = useState<any[]>([]);
   const [mappings, setMappings] = useState<any[]>([]);
@@ -131,6 +134,9 @@ export default function SmartboardPage() {
           setSelectedSemester(activeSlot.semester || "");
           setSelectedSubject(activeSlot.subject || "");
           setSelectedRoom(activeSlot.room || "");
+          setSelectedTimeSlot(activeSlot.startTime && activeSlot.endTime ? `${activeSlot.startTime}-${activeSlot.endTime}` : "");
+          setSelectedSection(activeSlot.section || "");
+          setSelectedGroup(activeSlot.group || "");
         }
         
       } else if (data?.status === "marking-attendance") {
@@ -152,21 +158,52 @@ export default function SmartboardPage() {
     }
     
     const resolveStudentMeta = (u: any) => {
-      if (!u.regNo) return { branch: "N/A", semester: "N/A" };
+      if (!u.regNo) return { branch: "N/A", semester: "N/A", section: null, group: null };
       const prefix = u.regNo.substring(0, 8);
       const mapping = mappings.find(m => m.prefix === prefix);
-      return mapping ? { branch: mapping.branch, semester: mapping.semester } : { branch: "Unmapped", semester: "Unmapped" };
+      
+      let sectionMatch = null;
+      let groupMatch = null;
+      
+      if (mapping && mapping.sections) {
+         const numericSuffix = parseInt(u.regNo.substring(8), 10);
+         if (!isNaN(numericSuffix)) {
+            for (const sec of mapping.sections) {
+               if (numericSuffix >= sec.startRoll && numericSuffix <= sec.endRoll) {
+                  sectionMatch = sec.name;
+                  if (sec.groups) {
+                     for (const grp of sec.groups) {
+                        if (numericSuffix >= grp.startRoll && numericSuffix <= grp.endRoll) {
+                           groupMatch = grp.name;
+                           break;
+                        }
+                     }
+                  }
+                  break;
+               }
+            }
+         }
+      }
+
+      return mapping ? { branch: mapping.branch, semester: mapping.semester, section: sectionMatch, group: groupMatch } : { branch: "Unmapped", semester: "Unmapped", section: null, group: null };
     };
 
     const filtered = students.filter(s => {
       const meta = resolveStudentMeta(s);
-      return meta.branch === selectedBranch && meta.semester === selectedSemester;
+      let matches = meta.branch === selectedBranch && meta.semester === selectedSemester;
+      if (matches && selectedSection) {
+         matches = meta.section === selectedSection;
+         if (matches && selectedGroup) {
+            matches = meta.group === selectedGroup;
+         }
+      }
+      return matches;
     });
     
     // Sort by name
     filtered.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
     setFilteredStudents(filtered);
-  }, [selectedBranch, selectedSemester, students, mappings]);
+  }, [selectedBranch, selectedSemester, selectedSection, selectedGroup, students, mappings]);
 
   // Listen for attendance updates
   useEffect(() => {
@@ -278,7 +315,9 @@ export default function SmartboardPage() {
       const leaderboardDocRef = doc(db, "SubjectAttendance", `${cleanBranch}_${cleanSem}_${cleanSub}`);
       await setDoc(leaderboardDocRef, { subject: selectedSubject, branch: selectedBranch, semester: selectedSemester }, { merge: true });
       
-      const dateDocRef = doc(collection(leaderboardDocRef, "dates"), dateStr);
+      const safeTimeSlot = selectedTimeSlot.replace(/[^a-zA-Z0-9]/g, '');
+      const docId = safeTimeSlot ? `${dateStr}_${safeTimeSlot}` : dateStr;
+      const dateDocRef = doc(collection(leaderboardDocRef, "dates"), docId);
       
       // Build attendance map by regNo
       const finalAttendanceMap: Record<string, string> = {};
@@ -292,6 +331,7 @@ export default function SmartboardPage() {
       await setDoc(dateDocRef, {
          teacherName: activeTeacher || "Professor",
          date: dateStr,
+         timeslot: selectedTimeSlot || "",
          attendance: finalAttendanceMap,
          timestamp: serverTimestamp()
       }, { merge: true });
@@ -386,7 +426,11 @@ export default function SmartboardPage() {
            branch: selectedBranch,
            semester: selectedSemester,
            subject: selectedSubject,
-           room: selectedRoom
+           room: selectedRoom,
+           timeSlot: selectedTimeSlot,
+           teacherName: activeTeacher,
+           section: selectedSection,
+           group: selectedGroup
         }
       });
     }
@@ -524,7 +568,7 @@ export default function SmartboardPage() {
                    
                    <div className="space-y-1.5">
                       <label className="text-xs font-semibold text-slate-400">Branch</label>
-                      <select value={selectedBranch} onChange={e => setSelectedBranch(e.target.value)} className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-all">
+                      <select value={selectedBranch} onChange={e => { setSelectedBranch(e.target.value); setSelectedSection(""); setSelectedGroup(""); }} className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-all">
                          <option value="">Select Branch</option>
                          {branches.map(b => <option key={b} value={b}>{b}</option>)}
                       </select>
@@ -532,10 +576,32 @@ export default function SmartboardPage() {
                    
                    <div className="space-y-1.5">
                       <label className="text-xs font-semibold text-slate-400">Semester</label>
-                      <select value={selectedSemester} onChange={e => setSelectedSemester(e.target.value)} className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-all">
+                      <select value={selectedSemester} onChange={e => { setSelectedSemester(e.target.value); setSelectedSection(""); setSelectedGroup(""); }} className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-all">
                          <option value="">Select Semester</option>
                          {semesters.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
+                   </div>
+
+                   <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                         <label className="text-xs font-semibold text-slate-400">Section</label>
+                         <select value={selectedSection} onChange={e => { setSelectedSection(e.target.value); setSelectedGroup(""); }} disabled={!selectedBranch || !selectedSemester} className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 transition-all disabled:opacity-50">
+                            <option value="">All Sections</option>
+                            {mappings.find(m => m.branch === selectedBranch && m.semester === selectedSemester)?.sections?.map((sec: any) => (
+                               <option key={sec.name} value={sec.name}>{sec.name}</option>
+                            ))}
+                         </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                         <label className="text-xs font-semibold text-slate-400">Group</label>
+                         <select value={selectedGroup} onChange={e => setSelectedGroup(e.target.value)} disabled={!selectedSection} className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500 transition-all disabled:opacity-50">
+                            <option value="">All Groups</option>
+                            {mappings.find(m => m.branch === selectedBranch && m.semester === selectedSemester)?.sections?.find((s: any) => s.name === selectedSection)?.groups?.map((grp: any) => (
+                               <option key={grp.name} value={grp.name}>{grp.name}</option>
+                            ))}
+                         </select>
+                      </div>
                    </div>
                 </div>
 
@@ -554,13 +620,18 @@ export default function SmartboardPage() {
                       <label className="text-xs font-semibold text-slate-400">Room</label>
                       <input type="text" value={selectedRoom} onChange={e => setSelectedRoom(e.target.value)} className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-500 transition-all uppercase" placeholder="e.g. LAB-01" />
                    </div>
+
+                   <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-slate-400">Time Slot</label>
+                      <input type="text" value={selectedTimeSlot} onChange={e => setSelectedTimeSlot(e.target.value)} className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-500 transition-all uppercase" placeholder="e.g. 10:00-11:00" />
+                   </div>
                 </div>
              </div>
 
              <div className="w-full mt-6 flex justify-end">
                 <button 
                   onClick={handleStartAttendance}
-                  disabled={!selectedBranch || !selectedSemester || !selectedSubject || !selectedRoom}
+                  disabled={!selectedBranch || !selectedSemester || !selectedSubject || !selectedRoom || !selectedTimeSlot}
                   className="btn-3d-blue py-3 px-8 text-sm uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                    Start Session
@@ -578,8 +649,13 @@ export default function SmartboardPage() {
                 </div>
                 <div className="flex items-center justify-between mb-4 relative z-10">
                    <div>
-                      <h3 className="text-lg sm:text-xl font-black text-white">{selectedSubject}</h3>
-                      <p className="text-[10px] text-slate-400 uppercase tracking-widest">{selectedBranch} • {selectedSemester} • {selectedRoom}</p>
+                      <h3 className="text-lg sm:text-xl font-black text-white">{selectedSubject} <span className="text-sm text-slate-400 font-medium tracking-normal ml-2">by {activeTeacher}</span></h3>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-widest">
+                         {selectedBranch} • {selectedSemester}
+                         {selectedSection && ` • Sec: ${selectedSection}`}
+                         {selectedGroup && ` • Grp: ${selectedGroup}`}
+                         {' • '} {selectedRoom} • {selectedTimeSlot}
+                      </p>
                    </div>
                    <div className="flex gap-4">
                       <div className="text-center">

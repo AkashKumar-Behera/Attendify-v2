@@ -19,9 +19,22 @@ This file serves as a persistent memory and activity log for all AI agents (Gemi
 
 ---
 
+### [2026-05-13 10:48] | Agent: Antigravity | Task: Admin Batch Mapping & Passout UI Optimization | Status: Done
+- **Batch Mapping Hierarchy**: Implemented badge-based visualization for Sections and Groups, providing a clear overview of student hierarchies.
+- **Passout Logic Integration**: Integrated Passout Year management into the Semester dropdown. Users are now prompted for a year when selecting "Passout", with an inline edit option available for existing passout batches.
+- **Responsive Admin Registry**: Optimized the Batch Mapping table for mobile devices using a flex-grid layout and enhanced the desktop table with standard Cyber-Noir badge styling.
+- **User Metadata Resolution**: Refined student metadata display in the user registry to correctly resolve and display Section/Group badges based on registration prefixes.
+- **Terminology Standardization**: Unified "Passout" handling across the system to ensure consistent data storage and visual representation.
+
+- Completely overhauled `README.md` to include a high-fidelity setup guide.
+- Added a detailed User Manual covering Admin Seeding, Infrastructure Setup, User Management, and Smartboard Workflows.
+- Included an environment variable template with descriptive placeholders as requested.
+- Standardized the documentation to match the Cyber-Noir brand aesthetic.
+
 ### [2026-05-12 23:01] | Agent: Antigravity | Task: Revert Timetable UI Fix | Status: Done
 - Reverted commit `ef78dca4dafd45bc36515afe08683929d3294e53` which added `w-fit` to the timetable and accidentally included an untracked subproject `attendify`.
 - Removed the untracked `attendify` directory.
+
 
 ### [2026-05-12 17:15] | Agent: Antigravity | Task: Smartboard Sidebar Restoration & 100% Zoom Fix | Status: Done
 - **Sidebar Timer Restoration:** Successfully moved the session timer back to the sidebar, positioned directly beneath the QR code as requested.

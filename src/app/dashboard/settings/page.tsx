@@ -9,6 +9,7 @@ import { auth, db } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc, updateDoc } from "firebase/firestore";
 import { motion, AnimatePresence } from "framer-motion";
+import SectionManagerModal from "./SectionManagerModal";
 
 export default function SettingsPage() {
   const { userData } = useAuth();
@@ -22,9 +23,10 @@ export default function SettingsPage() {
   const [newSem, setNewSem] = useState("");
   const [newSubject, setNewSubject] = useState("");
   const [newSubjectBranch, setNewSubjectBranch] = useState("");
-  const [newMapping, setNewMapping] = useState({ prefix: "", branch: "", semester: "" });
-  const [editingData, setEditingData] = useState<Record<string, { branch: string, semester: string }>>({});
+  const [newMapping, setNewMapping] = useState({ prefix: "", branch: "", semester: "", passoutYear: "" });
+  const [editingData, setEditingData] = useState<Record<string, { branch: string, semester: string, passoutYear: string }>>({});
   const [editingSubject, setEditingSubject] = useState<any>(null);
+  const [selectedBatchForSections, setSelectedBatchForSections] = useState<any | null>(null);
   const [resetSent, setResetSent] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
 
@@ -73,11 +75,11 @@ export default function SettingsPage() {
   const handleAddMapping = async (e: React.FormEvent) => {
     e.preventDefault(); if (!newMapping.prefix.trim()) return;
     await addDoc(collection(db, "batchMappings"), newMapping);
-    setNewMapping({ ...newMapping, prefix: "" });
+    setNewMapping({ ...newMapping, prefix: "", passoutYear: "" });
   };
 
-  const handleUpdateMapping = async (id: string, branch: string, semester: string) => {
-    await updateDoc(doc(db, "batchMappings", id), { branch, semester });
+  const handleUpdateMapping = async (id: string, branch: string, semester: string, passoutYear: string) => {
+    await updateDoc(doc(db, "batchMappings", id), { branch, semester, passoutYear: passoutYear || "" });
   };
 
   const handleDelete = async (col: string, id: string) => {
@@ -453,7 +455,7 @@ export default function SettingsPage() {
                   </div>
               </div>
 
-              <form onSubmit={handleAddMapping} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 bg-slate-950/60 p-4 md:p-6 rounded-lg border border-white/5 shadow-inner mb-12">
+              <form onSubmit={handleAddMapping} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 md:gap-6 bg-slate-950/60 p-4 md:p-6 rounded-lg border border-white/5 shadow-inner mb-12">
                   <div className="space-y-4">
                     <label className="text-[10px] font-black text-slate-600 uppercase tracking-[0.4em] ml-2">Batch</label>
                     <input 
@@ -483,7 +485,18 @@ export default function SettingsPage() {
                     >
                         <option value="">Select Sem</option>
                         {semesters.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                        <option value="Passout">Passout</option>
                     </select>
+                  </div>
+                  <div className="space-y-4">
+                    <label className="text-[10px] font-black text-slate-600 uppercase tracking-[0.4em] ml-2">Passout Year</label>
+                    <input 
+                      type="text" placeholder="e.g. 2027"
+                      value={newMapping.passoutYear} 
+                      onChange={e => setNewMapping({...newMapping, passoutYear: e.target.value})}
+                      disabled={newMapping.semester !== 'Passout'}
+                      className="w-full bg-slate-950 border border-white/10 rounded-lg px-5 py-4 text-sm font-mono font-black text-amber-400 outline-none focus:border-amber-500/50 transition-all shadow-2xl placeholder:text-slate-800 tracking-[0.3em] disabled:opacity-50"
+                    />
                   </div>
                   <button type="submit" className="relative group/btn bg-white text-slate-950 hover:bg-indigo-600 hover:text-white font-black text-[11px] uppercase tracking-[0.3em] py-4 rounded-lg mt-auto shadow-[0_20px_40px_-10px_rgba(0,0,0,0.5)] transition-all duration-700 active:scale-95 overflow-hidden">
                     <span className="relative z-10 flex items-center justify-center gap-3 italic">
@@ -498,20 +511,53 @@ export default function SettingsPage() {
                     {/* Mobile Card View */}
                     <div className="block md:hidden divide-y divide-white/5">
                       {batchMappings.map(m => {
-                          const currentData = editingData[m.id] || { branch: m.branch, semester: m.semester };
-                          const hasChanges = editingData[m.id] && (editingData[m.id].branch !== m.branch || editingData[m.id].semester !== m.semester);
+                          const currentData = editingData[m.id] || { branch: m.branch, semester: m.semester, passoutYear: m.passoutYear || "" };
+                          const hasChanges = editingData[m.id] && (editingData[m.id].branch !== m.branch || editingData[m.id].semester !== m.semester || editingData[m.id].passoutYear !== (m.passoutYear || ""));
 
                           return (
                             <div key={m.id} className="p-4 hover:bg-white/[0.03] transition-all space-y-4">
                                 <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-3">
-                                      <div className="w-2 h-2 bg-blue-500 rounded-full shadow-[0_0_15px_rgba(59,130,246,1)]"></div>
-                                      <span className="text-sm font-mono text-blue-400 font-black tracking-[0.3em] uppercase italic">{m.prefix}</span>
+                                  <div className="flex flex-col gap-2">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-2 h-2 bg-blue-500 rounded-full shadow-[0_0_15px_rgba(59,130,246,1)]"></div>
+                                        <span className="text-sm font-mono text-blue-400 font-black tracking-[0.3em] uppercase italic">{m.prefix}</span>
+                                        {m.semester === 'Passout' && m.passoutYear && (
+                                          <span className="ml-2 px-2 py-0.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded text-[9px] font-black tracking-widest uppercase">
+                                            {m.passoutYear}
+                                          </span>
+                                        )}
+                                    </div>
+                                    {m.sections && m.sections.length > 0 && (
+                                      <div className="flex flex-col gap-2 pl-5 mt-2">
+                                        {m.sections.map((sec: any) => (
+                                          <div key={sec.id} className="flex flex-col gap-1.5">
+                                            <span className="w-fit px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded text-[9px] font-black uppercase tracking-wider shadow-[0_0_10px_rgba(16,185,129,0.1)]">
+                                              {sec.name}
+                                            </span>
+                                            {sec.groups && sec.groups.length > 0 && (
+                                              <div className="flex flex-wrap gap-1.5 pl-3 border-l border-white/5 ml-2">
+                                                {sec.groups.map((grp: any) => (
+                                                  <span key={grp.id} className="px-2 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded text-[8px] font-black uppercase tracking-wider shadow-sm">
+                                                    {grp.name}
+                                                  </span>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
                                   </div>
                                   <div className="flex items-center gap-2">
+                                      <button 
+                                        onClick={() => setSelectedBatchForSections(m)} 
+                                        className="p-2 text-blue-400 hover:text-white bg-blue-500/10 hover:bg-blue-500 rounded-lg transition-all border border-transparent shrink-0"
+                                      >
+                                          <Edit2 size={16} />
+                                      </button>
                                       {hasChanges && (
                                         <button 
-                                          onClick={() => handleUpdateMapping(m.id, currentData.branch, currentData.semester)}
+                                          onClick={() => handleUpdateMapping(m.id, currentData.branch, currentData.semester, currentData.passoutYear)}
                                           className="p-2 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg transition-all animate-pulse hover:bg-emerald-500 hover:text-white shadow-lg shrink-0"
                                         >
                                           <Check size={16} />
@@ -525,25 +571,47 @@ export default function SettingsPage() {
                                       </button>
                                   </div>
                                 </div>
-                                <div className="grid grid-cols-2 gap-3 bg-slate-900/50 p-3 rounded-lg border border-white/5">
-                                  <div className="space-y-1">
+                                <div className="flex gap-3 bg-slate-900/50 p-3 rounded-lg border border-white/5">
+                                  <div className="flex-1 space-y-1">
                                     <label className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em]">Branch</label>
                                     <select 
                                       value={currentData.branch}
                                       onChange={e => setEditingData({ ...editingData, [m.id]: { ...currentData, branch: e.target.value } })}
-                                      className="w-full bg-slate-900 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] font-black text-slate-300 outline-none focus:border-indigo-500/50 transition-all appearance-none cursor-pointer"
+                                      className="w-full bg-slate-800/80 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] font-black text-slate-300 tracking-widest uppercase outline-none focus:border-indigo-500/50 transition-all appearance-none cursor-pointer text-center shadow-sm"
                                     >
                                         {branches.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
                                     </select>
                                   </div>
-                                  <div className="space-y-1">
-                                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em]">Sem</label>
+                                  <div className="flex-1 space-y-1">
+                                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em] flex items-center justify-between">
+                                      Sem
+                                      {currentData.semester === 'Passout' && currentData.passoutYear && (
+                                        <button 
+                                          onClick={() => {
+                                            const inputYear = prompt("Edit Passout Year:", currentData.passoutYear);
+                                            if (inputYear) setEditingData({ ...editingData, [m.id]: { ...currentData, passoutYear: inputYear } });
+                                          }}
+                                          className="text-amber-400 hover:text-amber-300"
+                                        >
+                                          <Edit2 size={10} />
+                                        </button>
+                                      )}
+                                    </label>
                                     <select 
                                       value={currentData.semester}
-                                      onChange={e => setEditingData({ ...editingData, [m.id]: { ...currentData, semester: e.target.value } })}
-                                      className="w-full bg-slate-900 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] font-black text-indigo-400 outline-none focus:border-indigo-500/50 transition-all appearance-none cursor-pointer"
+                                      onChange={e => {
+                                        const val = e.target.value;
+                                        let year = currentData.passoutYear;
+                                        if (val === 'Passout') {
+                                          const inputYear = prompt("Enter Passout Year (e.g. 2027):", year || "");
+                                          if (inputYear) year = inputYear;
+                                        }
+                                        setEditingData({ ...editingData, [m.id]: { ...currentData, semester: val, passoutYear: year } });
+                                      }}
+                                      className="w-full bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-2 py-1.5 text-[10px] font-black text-indigo-400 tracking-widest uppercase outline-none focus:border-indigo-500/50 transition-all appearance-none cursor-pointer text-center shadow-[0_0_10px_rgba(99,102,241,0.1)]"
                                     >
                                         {semesters.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                                        <option value="Passout">Passout</option>
                                     </select>
                                   </div>
                                 </div>
@@ -564,40 +632,96 @@ export default function SettingsPage() {
                         </thead>
                         <tbody className="divide-y divide-white/5">
                           {batchMappings.map(m => {
-                              const currentData = editingData[m.id] || { branch: m.branch, semester: m.semester };
-                              const hasChanges = editingData[m.id] && (editingData[m.id].branch !== m.branch || editingData[m.id].semester !== m.semester);
+                              const currentData = editingData[m.id] || { branch: m.branch, semester: m.semester, passoutYear: m.passoutYear || "" };
+                              const hasChanges = editingData[m.id] && (editingData[m.id].branch !== m.branch || editingData[m.id].semester !== m.semester || editingData[m.id].passoutYear !== (m.passoutYear || ""));
 
                               return (
                                 <tr key={m.id} className="hover:bg-white/[0.03] transition-all group/row">
                                     <td className="px-6 py-5">
-                                      <div className="flex items-center gap-4">
-                                          <div className="w-2 h-2 bg-blue-500 rounded-full shadow-[0_0_15px_rgba(59,130,246,1)] group-hover/row:scale-125 transition-transform"></div>
-                                          <span className="text-sm font-mono text-blue-400 font-black tracking-[0.3em] uppercase italic">{m.prefix}</span>
+                                      <div className="flex flex-col gap-2">
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-2 h-2 bg-blue-500 rounded-full shadow-[0_0_15px_rgba(59,130,246,1)] group-hover/row:scale-125 transition-transform"></div>
+                                            <span className="text-sm font-mono text-blue-400 font-black tracking-[0.3em] uppercase italic">{m.prefix}</span>
+                                            {m.semester === 'Passout' && m.passoutYear && (
+                                              <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded text-[10px] font-black tracking-widest uppercase shadow-[0_0_10px_rgba(245,158,11,0.2)]">
+                                                {m.passoutYear}
+                                              </span>
+                                            )}
+                                        </div>
+                                        {m.sections && m.sections.length > 0 && (
+                                          <div className="flex flex-col gap-2 pl-6 mt-2">
+                                            {m.sections.map((sec: any) => (
+                                              <div key={sec.id} className="flex flex-col gap-1.5">
+                                                <span className="w-fit px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded text-[9px] font-black uppercase tracking-wider shadow-[0_0_10px_rgba(16,185,129,0.1)]">
+                                                  {sec.name}
+                                                </span>
+                                                {sec.groups && sec.groups.length > 0 && (
+                                                  <div className="flex flex-wrap gap-1.5 pl-3 border-l border-white/5 ml-2">
+                                                    {sec.groups.map((grp: any) => (
+                                                      <span key={grp.id} className="px-2 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded text-[8px] font-black uppercase tracking-wider shadow-sm">
+                                                        {grp.name}
+                                                      </span>
+                                                    ))}
+                                                  </div>
+                                                )}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
                                       </div>
                                     </td>
                                     <td className="px-6 py-5">
                                       <select 
                                         value={currentData.branch}
                                         onChange={e => setEditingData({ ...editingData, [m.id]: { ...currentData, branch: e.target.value } })}
-                                        className="bg-slate-900 border border-white/10 rounded-lg px-4 py-2 text-[11px] font-black text-slate-300 outline-none focus:border-indigo-500/50 transition-all appearance-none cursor-pointer hover:bg-slate-800"
+                                        className="bg-slate-800/80 border border-slate-700 rounded px-3 py-1.5 text-[10px] font-black tracking-widest uppercase text-slate-300 outline-none focus:border-indigo-500/50 transition-all appearance-none cursor-pointer hover:bg-slate-700/80 text-center shadow-sm"
                                       >
                                           {branches.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
                                       </select>
                                     </td>
                                     <td className="px-6 py-5">
-                                      <select 
-                                        value={currentData.semester}
-                                        onChange={e => setEditingData({ ...editingData, [m.id]: { ...currentData, semester: e.target.value } })}
-                                        className="bg-slate-900 border border-white/10 rounded-lg px-4 py-2 text-[11px] font-black text-indigo-400 outline-none focus:border-indigo-500/50 transition-all appearance-none cursor-pointer hover:bg-slate-800"
-                                      >
-                                          {semesters.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                                      </select>
+                                      <div className="flex items-center gap-2">
+                                        <select 
+                                          value={currentData.semester}
+                                          onChange={e => {
+                                            const val = e.target.value;
+                                            let year = currentData.passoutYear;
+                                            if (val === 'Passout') {
+                                              const inputYear = prompt("Enter Passout Year (e.g. 2027):", year || "");
+                                              if (inputYear) year = inputYear;
+                                            }
+                                            setEditingData({ ...editingData, [m.id]: { ...currentData, semester: val, passoutYear: year } });
+                                          }}
+                                          className="bg-indigo-500/10 border border-indigo-500/20 rounded px-3 py-1.5 text-[10px] font-black tracking-widest uppercase text-indigo-400 outline-none focus:border-indigo-500/50 transition-all appearance-none cursor-pointer hover:bg-indigo-500/20 text-center shadow-[0_0_10px_rgba(99,102,241,0.1)]"
+                                        >
+                                            {semesters.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                                            <option value="Passout">Passout</option>
+                                        </select>
+                                        {currentData.semester === 'Passout' && currentData.passoutYear && (
+                                          <button 
+                                            onClick={() => {
+                                              const inputYear = prompt("Edit Passout Year:", currentData.passoutYear);
+                                              if (inputYear) setEditingData({ ...editingData, [m.id]: { ...currentData, passoutYear: inputYear } });
+                                            }}
+                                            className="p-1.5 text-amber-400/50 hover:text-amber-400 transition-colors"
+                                            title="Edit Passout Year"
+                                          >
+                                            <Edit2 size={12} />
+                                          </button>
+                                        )}
+                                      </div>
                                     </td>
                                     <td className="px-6 py-5 text-right">
                                       <div className="flex items-center justify-end gap-3">
+                                          <button 
+                                            onClick={() => setSelectedBatchForSections(m)} 
+                                            className="p-2.5 text-blue-400 bg-blue-500/10 hover:bg-blue-500 hover:text-white border border-transparent rounded-lg transition-all shadow-lg"
+                                          >
+                                              <Edit2 size={16} />
+                                          </button>
                                           {hasChanges && (
                                             <button 
-                                              onClick={() => handleUpdateMapping(m.id, currentData.branch, currentData.semester)}
+                                              onClick={() => handleUpdateMapping(m.id, currentData.branch, currentData.semester, currentData.passoutYear)}
                                               className="p-2.5 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg transition-all animate-pulse hover:bg-emerald-500 hover:text-white shadow-lg"
                                             >
                                               <Check size={16} />
@@ -844,6 +968,14 @@ export default function SettingsPage() {
               </form>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {selectedBatchForSections && (
+          <SectionManagerModal 
+            batch={selectedBatchForSections}
+            onClose={() => setSelectedBatchForSections(null)}
+          />
         )}
       </AnimatePresence>
     </motion.div>
