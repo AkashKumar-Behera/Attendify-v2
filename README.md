@@ -169,8 +169,9 @@ Agents and developers MUST maintain the `docs/CONTEXT.md` file as a shared memor
 
 ---
 
-## 📄 License
-This project is licensed under the MIT License.
+## 🔒 Proprietary Notice
+Copyright © 2026 **Akash Kumar Behera**. All Rights Reserved.
+This project and its contents are the exclusive property of the author. Unauthorized copying, modification, or distribution of this software is strictly prohibited.
 
 ---
 
