@@ -15,7 +15,8 @@ import {
   Menu,
   X,
   Scan,
-  Bell
+  Bell,
+  History
 } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import { signOut } from "firebase/auth";
@@ -55,6 +56,7 @@ export default function DashboardLayout({
     { name: "Users", icon: UserPlus, href: "/dashboard/users", roles: ["admin", "teacher"] },
     { name: "Timetable", icon: Calendar, href: "/dashboard/timetable", roles: ["admin", "teacher", "student"] },
     { name: "Attendance", icon: QrCode, href: "/dashboard/scan", roles: ["teacher", "student"] },
+    { name: "Records", icon: History, href: "/dashboard/history", roles: ["admin", "teacher"] },
     { name: "Settings", icon: Settings, href: "/dashboard/settings", roles: ["admin", "teacher", "student"] },
   ];
 
