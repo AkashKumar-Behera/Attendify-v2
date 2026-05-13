@@ -176,8 +176,8 @@ This project and its contents are the exclusive property of the author. Unauthor
 ---
 
 ## 👥 Authors
-- **Akash Kumar Behera** - *Initial work*
-
+- **Akash Kumar Behera** - *Initial work & Architecture*
+- **Pritam Das** - *Core Contributor*
 ---
 
 <div align="center">
