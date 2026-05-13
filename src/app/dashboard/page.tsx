@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect } from "react";
-import { collection, query, where, getDocs } from "firebase/firestore";
+import { collection, query, where, getDocs, getCountFromServer } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -44,9 +44,7 @@ export default function DashboardPage() {
     }
   }, [userData]);
 
-  useEffect(() => {
-    initializeStats();
-  }, [todaySchedule]);
+  // removed initializeStats hook
 
   const fetchTodayData = async () => {
     setLoading(true);
@@ -74,21 +72,29 @@ export default function DashboardPage() {
       const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       const sorted = data.sort((a: any, b: any) => a.startTime.localeCompare(b.startTime));
       setTodaySchedule(sorted);
+
+      // Fetch real stats
+      let totalUsersCount = 0;
+      try {
+         const usersSnap = await getCountFromServer(collection(db, "users"));
+         totalUsersCount = usersSnap.data().count;
+      } catch (e) {
+         console.error(e);
+      }
+      
+      const baseStats = [
+        { name: "Today's Classes", value: sorted.length.toString(), icon: Clock, color: "text-indigo-400", bg: "bg-indigo-500/10", border: "border-indigo-500/20" },
+        { name: "Total Users", value: totalUsersCount.toString(), icon: Users, color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" },
+        { name: "System Status", value: "Online", icon: ShieldCheck, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
+        { name: "Notifications", value: "0", icon: AlertCircle, color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/20" },
+      ];
+      setStats(baseStats);
+
     } catch (error) {
       console.error("Dashboard Fetch Error:", error);
     } finally {
       setLoading(false);
     }
-  };
-
-  const initializeStats = () => {
-    const baseStats = [
-      { name: "Today's Classes", value: todaySchedule.length.toString(), icon: Clock, color: "text-indigo-400", bg: "bg-indigo-500/10", border: "border-indigo-500/20" },
-      { name: "Attendance Rate", value: "92%", icon: TrendingUp, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
-      { name: "Total Users", value: "450", icon: Users, color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" },
-      { name: "Notifications", value: "0", icon: AlertCircle, color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/20" },
-    ];
-    setStats(baseStats);
   };
 
   const getCurrentSession = () => {
