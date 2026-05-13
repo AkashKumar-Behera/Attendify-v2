@@ -19,6 +19,12 @@ This file serves as a persistent memory and activity log for all AI agents (Gemi
 
 ---
 
+### [2026-05-13 13:52] | Agent: Antigravity | Task: Documentation Overhaul & Technical Infographic | Status: Done
+- **Premium Infographic Flow**: Generated a high-fidelity technical infographic (`docs/infographic_flow.png`) summarizing the full system architecture (Security, Academic, Session, Cloud).
+- **Documentation Hub**: Created `docs/FLOWCHART.md` containing multiple versions of system diagrams (Technical, Presentation, Infographic).
+- **README Modernization**: Completely rewrote `README.md` to feature high-end descriptions, feature lists, and the exact environment configuration template requested.
+- **Workflow Integration**: Hardened the connection between README and technical docs for easier onboarding and presentation readiness.
+
 ### [2026-05-13 10:48] | Agent: Antigravity | Task: Admin Batch Mapping & Passout UI Optimization | Status: Done
 - **Batch Mapping Hierarchy**: Implemented badge-based visualization for Sections and Groups, providing a clear overview of student hierarchies.
 - **Passout Logic Integration**: Integrated Passout Year management into the Semester dropdown. Users are now prompted for a year when selecting "Passout", with an inline edit option available for existing passout batches.
