@@ -1,50 +1,72 @@
-# 🛡️ Attendify v2: Advanced Attendance Ecosystem
+# 🎓 Attendify-v2
 
-Attendify v2 is a high-performance, real-time attendance management system designed for academic environments. Built with **Next.js 15** and **Firebase**, it eliminates manual marking and fraud through dynamic security protocols and a premium "Cyber-Noir" aesthetic.
+<div align="center">
 
----
+**Next-Gen Attendance Verification System**
 
-## ✨ Key Features
+Secure, real-time, and fraud-proof attendance tracking for modern colleges using dynamic QR codes and geofencing.
 
-*   **Smartboard Integration**: Real-time synchronization of student scans using Firebase `onSnapshot` for sub-100ms updates.
-*   **Anti-Fraud Engine**: 
-    *   **GPS Geofencing**: Validates student location within a 50m radius of the classroom.
-    *   **Mock Detection**: Advanced detection of GPS spoofing and historical data correlation.
-*   **Dynamic QR Protocol**: Secure QR codes that refresh every 5 seconds to prevent "photo-sharing" proxies.
-*   **Automated Timetable**: Intelligent subject detection based on a centralized academic registry.
-*   **Cyber-Noir UI**: A premium, state-of-the-art interface featuring glassmorphism, glowing borders, and Framer Motion animations.
+[Features](#-features) • [Tech Stack](#-tech-stack) • [Installation](#-installation) • [Architecture](#-architecture)
 
-## 🚀 Tech Stack
-
-*   **Core**: Next.js 15 (App Router), TypeScript
-*   **Database**: Firebase Firestore (Real-time SDK)
-*   **Security**: Firebase Auth (Role-Based Access Control: Admin, Teacher, Student)
-*   **Styling**: Tailwind CSS v4, Framer Motion, Lucide Icons
+</div>
 
 ---
 
-## 📊 System Architecture
+## ✨ Features
 
-For a detailed technical breakdown of the system logic, security matrix, and session lifecycle, please refer to the visual documentation:
+### 🔐 Dynamic QR Codes
+Anti-spoofing QR codes that refresh every 5 seconds to prevent photo sharing and ensure session security.
 
-👉 **[View System Flowcharts](./docs/FLOWCHART.md)**
+### 📍 Geofencing & Anti-Fraud
+Students must be within 50 meters of the classroom to mark attendance. Includes mock location detection using GPS historical data correlation.
+
+### 👥 Role-Based Access Control
+- **👨💼 Admin** - Full system control, infrastructure management, user registry
+- **👩🏫 Teacher** - Manage classes, view timetables, initiate Smartboard sessions
+- **🎓 Student** - View schedules, scan QR codes, mark attendance
+
+### 📊 Real-Time Smartboard
+Live classroom session tracking with instant student scan synchronization and attendance grid visualization.
+
+### 🏛️ Academic Infrastructure
+Comprehensive management for Branches, Semesters, Subjects, and Timetables with high-density administrative controls.
 
 ---
 
-## 🛠️ Getting Started
+## 🛠 Tech Stack
 
-### 1. Installation
+| Component | Technology |
+|-----------|------------|
+| **Framework** | Next.js 15 (App Router) |
+| **Language** | TypeScript |
+| **Database** | Firebase Firestore (Real-time) |
+| **Authentication** | Firebase Auth (Custom RBAC) |
+| **Styling** | Tailwind CSS v4 & Framer Motion |
+| **QR Handling** | `html5-qrcode` (Scanning) & `react-qr-code` (Generation) |
+
+---
+
+## 🚀 Installation
+
+### Prerequisites
+- Node.js 20+ 
+- Firebase project with Auth and Firestore enabled
+
+### Setup Steps
+
+1. **Clone the repository**
 ```bash
-# Clone the repository
-git clone <repository-url>
+git clone https://github.com/AkashKumar-Behera/Attendify-v2.git
+cd Attendify-v2
+```
 
-# Install dependencies
+2. **Install dependencies**
+```bash
 npm install
 ```
 
-### 2. Environment Configuration 🔑
-Create a file named `.env.local` in the root and fill in your Firebase credentials exactly as shown below:
-
+3. **Configure Environment Variables 🔑**
+Create a `.env.local` file in the root directory with your Firebase credentials exactly as shown below:
 ```env
 # --- PUBLIC FIREBASE KEYS ---
 NEXT_PUBLIC_FIREBASE_API_KEY=enter_your_api_key_here
@@ -60,30 +82,82 @@ FIREBASE_CLIENT_EMAIL=enter_your_client_email_here
 FIREBASE_PRIVATE_KEY="enter_your_private_key_here_with_quotes"
 ```
 
-### 3. Run Development Server
+4. **Seed Master Admin Account**
+Open `scripts/seed-admin.mjs`, update the email/password, and run:
+```bash
+node scripts/seed-admin.mjs
+```
+
+5. **Run Development Server**
 ```bash
 npm run dev
 ```
 
 ---
 
-## 📘 User Manual: Step-by-Step Guide
+## 🏗 Architecture
 
-### Phase 1: Initial System Deployment
-1.  **Configure Admin**: Open `scripts/seed-admin.mjs` and update the email/password.
-2.  **Run Seed Script**: `node scripts/seed-admin.mjs`. This creates the Master Admin.
+### Technical Flowcharts
+For a high-fidelity technical infographic and engineering-level logic diagrams, visit the documentation hub:
 
-### Phase 2: Academic Infrastructure
-1.  **Login**: Access `/login` with Admin credentials.
-2.  **Setup**: Define Branches, Subjects, and Sections in the **Settings** dashboard.
-3.  **Mapping**: Configure Roll Number prefixes for automated metadata resolution.
+👉 **[View Detailed System Flowcharts](./docs/FLOWCHART.md)**
 
-### Phase 3: Smartboard Operations (Teacher)
-1.  **Initiate**: Open the **Smartboard** page.
-2.  **Scan**: The dynamic QR appears. As students scan, their names appear instantly:
-    *   🟢 **Present**: Valid scan & location.
-    *   🟡 **Proxy**: Scan detected but location failed/mock GPS found.
-    *   🔴 **Absent**: Not scanned.
+### System Logic Overview
+```mermaid
+graph TD
+    subgraph "Client Layer (Next.js 15)"
+        A["Smartboard Page"] -- "Generates dynamic QR" --> B["Student Scan Page"]
+        C["Admin Dashboard"] -- "Manages" --> D["User Registry"]
+        C -- "Configures" --> E["Timetable/Settings"]
+    end
+
+    subgraph "Backend Services (Firebase)"
+        F[("Firestore DB")]
+        G["Firebase Auth"]
+    end
+
+    subgraph "Logic & Security"
+        H["Geofencing Logic"]
+        I["Anti-Fraud Engine"]
+    end
+
+    A <--> F
+    B <--> F
+    B --> H
+    H --> I
+    D <--> F
+    E <--> F
+    G -- "Token/Role" --> C
+```
+
+---
+
+## 📁 Project Structure
+
+```
+Attendify-v2/
+├── src/
+│   ├── app/
+│   │   ├── page.tsx              # Landing page
+│   │   ├── login/                # Authentication
+│   │   ├── dashboard/            # Main dashboard (Admin/Teacher/Student)
+│   │   ├── smartboard/           # Classroom Smartboard interface
+│   │   └── scan/                 # Student QR scanning page
+│   └── components/              # Reusable UI components
+├── docs/                         # Documentation (Flowcharts/Logs)
+├── public/                       # Static assets
+└── package.json                 # Dependencies
+```
+
+---
+
+## 🎨 Design Philosophy
+
+Attendify v2 features a **"Cyber-Noir"** aesthetic with:
+- 🌑 Dark-themed interfaces with high contrast
+- ✨ Glassmorphism effects and glowing borders
+- 🎭 Smooth animations using Framer Motion
+- 📱 Fully responsive design for all devices
 
 ---
 
@@ -96,4 +170,19 @@ Agents and developers MUST maintain the `docs/CONTEXT.md` file as a shared memor
 ---
 
 ## 📄 License
-This project is for academic and presentation purposes. All rights reserved.
+This project is licensed under the MIT License.
+
+---
+
+## 👥 Authors
+- **Akash Kumar Behera** - *Initial work*
+
+---
+
+<div align="center">
+
+**Built for smart education 🎓**
+
+[⬆ Back to Top](#-attendify-v2)
+
+</div>
