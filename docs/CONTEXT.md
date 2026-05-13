@@ -24,6 +24,7 @@ This file serves as a persistent memory and activity log for all AI agents (Gemi
 - **Documentation Hub**: Created `docs/FLOWCHART.md` containing multiple versions of system diagrams (Technical, Presentation, Infographic).
 - **README Modernization**: Completely rewrote `README.md` to feature high-end descriptions, feature lists, and the exact environment configuration template requested.
 - **Template Finalization**: Applied a final premium Markdown template for the README with Mermaid diagrams and centralized project structure.
+- **Legal Hardening**: Removed MIT License and implemented a strict Proprietary Copyright notice to protect project ownership.
 - **Workflow Integration**: Hardened the connection between README and technical docs for easier onboarding and presentation readiness.
 
 ### [2026-05-13 10:48] | Agent: Antigravity | Task: Admin Batch Mapping & Passout UI Optimization | Status: Done
