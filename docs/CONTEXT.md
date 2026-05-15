@@ -19,6 +19,23 @@ This file serves as a persistent memory and activity log for all AI agents (Gemi
 
 ---
 
+### [2026-05-15 18:45] | Agent: Antigravity | Task: Timetable Modal UX & Search Stabilization | Status: Done
+- **Layout Refinement**: Optimized the search bar position next to the subject label with a Cyber-Noir glassmorphism aesthetic.
+- **Categorization & Sorting**: Implemented `<optgroup>` for Theory vs Labs and applied alphabetical sorting to all subject lists.
+- **Structural Integrity**: Resolved JSX tag balance issues and ensured search states reset correctly when modals are toggled.
+- **Validation**: Verified build stability with `tsc` and dev server health check.
+
+### [2026-05-15 18:35] | Agent: Antigravity | Task: Subject Search Bar Layout Optimization | Status: Done
+- **Layout Refinement**: Repositioned the search bar next to the subject label in Add/Edit modals for better accessibility and visual flow.
+- **Enhanced Styling**: Upgraded search input with a larger width (`w-32` to `w-40`), improved padding, and a glassmorphism focus effect (`bg-slate-950/50`, `border-white/10`).
+- **Cyber-Noir Polish**: Added focus-within animations and icon color shifts to align with the premium design system.
+
+### [2026-05-15 18:25] | Agent: Antigravity | Task: Searchable & Categorized Subject Selectors | Status: Done
+- **Searchable Dropdowns**: Implemented real-time search functionality within the subject labels of both "Add Class" and "Edit Class" modals, allowing for rapid filtering of academic subjects.
+- **Categorized Subject UI**: Refactored subject selection to use `<optgroup>` for distinct visual separation between "Theory Subjects" (Blue) and "Labs / Practicals" (Emerald).
+- **Alphabetical Sorting**: Automatically sorted all subject lists alphabetically to improve discoverability and administrative workflow efficiency.
+- **Independent State Management**: Utilized separate search states (`subjectSearch`, `editSubjectSearch`) for each modal to prevent input interference.
+
 ### [2026-05-15 18:05] | Agent: Antigravity | Task: Student Dashboard Analytics Integration | Status: Done
 - **Real-time Analytics**: Implemented dynamic attendance tracking for students using Recharts (Gauge Chart for overall health, Bar Graph for subject-wise trends).
 - **Data Aggregation**: Developed `fetchStudentAnalytics` to compute metrics by cross-referencing `smartboardSessions` and `attendance` records.
@@ -97,7 +114,6 @@ This file serves as a persistent memory and activity log for all AI agents (Gemi
 - Updated the UI to separate Search and Refresh functionalities for better user experience.
 
 ### [2026-05-12 11:26] | Agent: Antigravity | Task: User Modification Restrictions (Teacher Role) | Status: Done
-- Implemented role-based restrictions for user modification in `ManageUsersPage`.
 - Teachers can now ONLY modify (edit/delete) student records.
 - Action buttons (Delete/Edit) are hidden for non-student roles when viewed by a teacher.
 - Added client-side authorization checks in delete and update handlers.

@@ -52,6 +52,8 @@ export default function TimetablePage() {
   const [isPersonalMode, setIsPersonalMode] = useState(false);
   
   const [showAddModal, setShowAddModal] = useState(false);
+  const [subjectSearch, setSubjectSearch] = useState("");
+  const [editSubjectSearch, setEditSubjectSearch] = useState("");
   const [editingSlot, setEditingSlot] = useState<any | null>(null);
   const [timetable, setTimetable] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -405,7 +407,10 @@ export default function TimetablePage() {
 
             {userData?.role === 'admin' && (
               <button 
-                onClick={() => setShowAddModal(true)}
+                onClick={() => {
+                  setShowAddModal(true);
+                  setSubjectSearch("");
+                }}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 transition-all ml-auto"
               >
                 <Plus size={16} />
@@ -806,7 +811,10 @@ export default function TimetablePage() {
                     <p className="text-sm text-slate-400 mt-1">Schedule a class for {selectedDay}</p>
                  </div>
                  <button 
-                   onClick={() => setShowAddModal(false)} 
+                   onClick={() => {
+                     setShowAddModal(false);
+                     setSubjectSearch("");
+                   }} 
                    className="p-2 bg-slate-800 rounded-lg border border-white/5 text-slate-400 hover:text-white transition-all"
                  >
                    <X size={20}/>
@@ -886,31 +894,66 @@ export default function TimetablePage() {
                     </div>
                  </div>
 
-                 <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-400 flex items-center gap-2">
-                       <BookOpen size={14} className="text-emerald-400" />
-                       Subject
-                    </label>
-                    <select 
-                      value={newSlot.subject}
-                      onChange={e => setNewSlot({...newSlot, subject: e.target.value})}
-                      className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500 transition-all"
-                    >
-                       {!newSlot.branch ? (
-                         <option value="">Select Branch First</option>
-                       ) : (
-                         <>
-                           <option value="">Select Subject</option>
-                           {allSubjects
-                             .filter((s: any) => s.branch === newSlot.branch)
-                             .map((s: any, idx: number) => (
-                               <option key={`modal-sub-${idx}`} value={s.name}>{s.name}</option>
-                             ))
-                           }
-                         </>
-                       )}
-                    </select>
-                 </div>
+                  <div className="space-y-1.5">
+                     <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-semibold text-slate-400 flex items-center gap-2">
+                           <BookOpen size={14} className="text-emerald-400" />
+                           Subject
+                        </label>
+                        {newSlot.branch && (
+                          <div className="flex items-center gap-2 bg-slate-950/50 rounded-md border border-white/10 px-2 py-1 focus-within:border-emerald-500/50 transition-all group">
+                            <Search size={12} className="text-slate-500 group-focus-within:text-emerald-400 transition-colors" />
+                            <input 
+                              type="text"
+                              placeholder="Search subject..."
+                              value={subjectSearch}
+                              onChange={(e) => setSubjectSearch(e.target.value)}
+                              className="bg-transparent border-none focus:outline-none text-xs text-slate-300 w-32 md:w-40 placeholder:text-slate-600"
+                            />
+                          </div>
+                        )}
+                     </div>
+                     <select 
+                       value={newSlot.subject}
+                       onChange={e => setNewSlot({...newSlot, subject: e.target.value})}
+                       className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500 transition-all"
+                     >
+                        {!newSlot.branch ? (
+                          <option value="">Select Branch First</option>
+                        ) : (
+                          <>
+                            <option value="">Select Subject</option>
+                            {(() => {
+                              const filtered = allSubjects
+                                .filter((s: any) => s.branch === newSlot.branch && s.name.toLowerCase().includes(subjectSearch.toLowerCase()))
+                                .sort((a: any, b: any) => a.name.localeCompare(b.name));
+                              
+                              const theory = filtered.filter((s: any) => !s.name.toLowerCase().includes('lab'));
+                              const labs = filtered.filter((s: any) => s.name.toLowerCase().includes('lab'));
+
+                              return (
+                                <>
+                                  {theory.length > 0 && (
+                                    <optgroup label="Theory Subjects" className="bg-slate-900 text-blue-400 font-bold">
+                                      {theory.map((s: any, idx: number) => (
+                                        <option key={`modal-sub-th-${idx}`} value={s.name} className="bg-slate-950 text-white font-normal">{s.name}</option>
+                                      ))}
+                                    </optgroup>
+                                  )}
+                                  {labs.length > 0 && (
+                                    <optgroup label="Labs / Practicals" className="bg-slate-900 text-emerald-400 font-bold">
+                                      {labs.map((s: any, idx: number) => (
+                                        <option key={`modal-sub-lab-${idx}`} value={s.name} className="bg-slate-950 text-white font-normal">{s.name}</option>
+                                      ))}
+                                    </optgroup>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </>
+                        )}
+                     </select>
+                  </div>
 
                  <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
@@ -1012,7 +1055,10 @@ export default function TimetablePage() {
                     <p className="text-sm text-slate-400 mt-1">Update schedule details</p>
                  </div>
                  <button 
-                   onClick={() => setEditingSlot(null)} 
+                   onClick={() => {
+                     setEditingSlot(null);
+                     setEditSubjectSearch("");
+                   }} 
                    className="p-2 bg-slate-800 rounded-lg border border-white/5 text-slate-400 hover:text-white transition-all"
                  >
                    <X size={20}/>
@@ -1091,28 +1137,63 @@ export default function TimetablePage() {
                  </div>
 
                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-400 flex items-center gap-2">
-                       <BookOpen size={14} className="text-emerald-400" />
-                       Subject
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                       <label className="text-xs font-semibold text-slate-400 flex items-center gap-2">
+                          <BookOpen size={14} className="text-emerald-400" />
+                          Subject
+                       </label>
+                       {editingSlot.branch && (
+                         <div className="flex items-center gap-2 bg-slate-950/50 rounded-md border border-white/10 px-2 py-1 focus-within:border-emerald-500/50 transition-all group">
+                           <Search size={12} className="text-slate-500 group-focus-within:text-emerald-400 transition-colors" />
+                           <input 
+                             type="text"
+                             placeholder="Search subject..."
+                             value={editSubjectSearch}
+                             onChange={(e) => setEditSubjectSearch(e.target.value)}
+                             className="bg-transparent border-none focus:outline-none text-xs text-slate-300 w-32 md:w-40 placeholder:text-slate-600"
+                           />
+                         </div>
+                       )}
+                    </div>
                     <select 
                       value={editingSlot.subject}
                       onChange={e => setEditingSlot({...editingSlot, subject: e.target.value})}
                       className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500 transition-all"
                     >
-                      {!editingSlot.branch ? (
-                        <option value="">Select Branch First</option>
-                      ) : (
-                        <>
-                          <option value="">Select Subject</option>
-                          {allSubjects
-                            .filter((s: any) => s.branch === editingSlot.branch)
-                            .map((s: any, idx: number) => (
-                              <option key={`edit-sub-${idx}`} value={s.name}>{s.name}</option>
-                            ))
-                          }
-                        </>
-                      )}
+                       {!editingSlot.branch ? (
+                         <option value="">Select Branch First</option>
+                       ) : (
+                         <>
+                           <option value="">Select Subject</option>
+                           {(() => {
+                             const filtered = allSubjects
+                               .filter((s: any) => s.branch === editingSlot.branch && s.name.toLowerCase().includes(editSubjectSearch.toLowerCase()))
+                               .sort((a: any, b: any) => a.name.localeCompare(b.name));
+                             
+                             const theory = filtered.filter((s: any) => !s.name.toLowerCase().includes('lab'));
+                             const labs = filtered.filter((s: any) => s.name.toLowerCase().includes('lab'));
+
+                             return (
+                               <>
+                                 {theory.length > 0 && (
+                                   <optgroup label="Theory Subjects" className="bg-slate-900 text-blue-400 font-bold">
+                                     {theory.map((s: any, idx: number) => (
+                                       <option key={`edit-sub-th-${idx}`} value={s.name} className="bg-slate-950 text-white font-normal">{s.name}</option>
+                                     ))}
+                                   </optgroup>
+                                 )}
+                                 {labs.length > 0 && (
+                                   <optgroup label="Labs / Practicals" className="bg-slate-900 text-emerald-400 font-bold">
+                                     {labs.map((s: any, idx: number) => (
+                                       <option key={`edit-sub-lab-${idx}`} value={s.name} className="bg-slate-950 text-white font-normal">{s.name}</option>
+                                     ))}
+                                   </optgroup>
+                                 )}
+                               </>
+                             );
+                           })()}
+                         </>
+                       )}
                     </select>
                  </div>
 

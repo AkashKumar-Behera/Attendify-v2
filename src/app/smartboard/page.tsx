@@ -311,9 +311,9 @@ export default function SmartboardPage() {
 
       // Save structured data for Leaderboard
       const dateStr = new Date().toLocaleDateString("en-IN").replace(/\//g, "-");
-      const cleanBranch = selectedBranch.replace(/\s+/g, '_');
-      const cleanSem = selectedSemester.replace(/\s+/g, '_');
-      const cleanSub = selectedSubject.replace(/\s+/g, '_');
+      const cleanBranch = selectedBranch.replace(/[\s/]+/g, '_');
+      const cleanSem = selectedSemester.replace(/[\s/]+/g, '_');
+      const cleanSub = selectedSubject.replace(/[\s/]+/g, '_');
       
       const leaderboardDocRef = doc(db, "SubjectAttendance", `${cleanBranch}_${cleanSem}_${cleanSub}`);
       await setDoc(leaderboardDocRef, { subject: selectedSubject, branch: selectedBranch, semester: selectedSemester }, { merge: true });
@@ -369,9 +369,9 @@ export default function SmartboardPage() {
   const toggleLeaderboard = async () => {
     if (!showLeaderboard) {
       try {
-        const cleanBranch = selectedBranch.replace(/\s+/g, '_');
-        const cleanSem = selectedSemester.replace(/\s+/g, '_');
-        const cleanSub = selectedSubject.replace(/\s+/g, '_');
+        const cleanBranch = selectedBranch.replace(/[\s/]+/g, '_');
+        const cleanSem = selectedSemester.replace(/[\s/]+/g, '_');
+        const cleanSub = selectedSubject.replace(/[\s/]+/g, '_');
         
         const datesColRef = collection(db, "SubjectAttendance", `${cleanBranch}_${cleanSem}_${cleanSub}`, "dates");
         const datesSnap = await getDocs(datesColRef);
