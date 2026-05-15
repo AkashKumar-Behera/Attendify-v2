@@ -213,6 +213,13 @@ export default function DashboardPage() {
 
   const currentSession = getCurrentSession();
 
+  // Color thresholds: <45% red, 45-75% yellow, >=75% green
+  const getAttendanceColor = (pct: number) => {
+    if (pct >= 75) return "#22c55e"; // green
+    if (pct >= 45) return "#eab308"; // yellow
+    return "#f43f5e";                // red
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
@@ -285,12 +292,12 @@ export default function DashboardPage() {
 
         {/* Attendance Health Gauge (Right) */}
         <div className="lg:col-span-4 flex flex-col">
-          <div className="bg-slate-900 p-8 rounded-lg border border-slate-800 shadow-xl flex flex-col items-center h-full justify-center min-h-[400px]">
-            <div className="w-full flex justify-between items-center mb-8">
+          <div className="bg-slate-900 p-5 rounded-lg border border-slate-800 shadow-xl flex flex-col items-center h-full justify-center min-h-[400px]">
+            <div className="w-full flex justify-between items-center mb-4">
                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Attendance Health</h4>
                <TrendingUp size={16} className="text-emerald-400" />
             </div>
-            <div className="relative w-full h-[240px]">
+            <div className="relative w-full h-[180px]">
                <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                      <Pie
@@ -302,27 +309,28 @@ export default function DashboardPage() {
                         cy="100%"
                         startAngle={180}
                         endAngle={0}
-                        innerRadius="110%"
-                        outerRadius="140%"
+                        innerRadius="90%"
+                        outerRadius="115%"
                         paddingAngle={0}
                         dataKey="value"
+                        isAnimationActive={false}
                      >
-                        <Cell fill={studentAnalytics && studentAnalytics.percentage >= 75 ? "#3b82f6" : "#f43f5e"} />
+                        <Cell fill={getAttendanceColor(studentAnalytics?.percentage || 0)} />
                         <Cell fill="#1e293b" />
                      </Pie>
                   </PieChart>
                </ResponsiveContainer>
-               <div className="absolute inset-0 flex flex-col items-center justify-end pb-4">
-                  <span className="text-6xl font-black text-white">{studentAnalytics?.percentage || 0}%</span>
-                  <span className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-2">Total Average</span>
+               <div className="absolute inset-0 flex flex-col items-center justify-end pb-2">
+                  <span className="text-5xl font-black" style={{ color: getAttendanceColor(studentAnalytics?.percentage || 0) }}>{studentAnalytics?.percentage || 0}%</span>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Total Average</span>
                </div>
             </div>
-            <div className="grid grid-cols-2 w-full gap-4 mt-12">
-               <div className="text-center p-4 bg-slate-950 rounded-xl border border-slate-800">
+            <div className="grid grid-cols-2 w-full gap-3 mt-6">
+               <div className="text-center p-3 bg-slate-950 rounded-xl border border-slate-800">
                   <p className="text-2xl font-black text-white">{studentAnalytics?.totalPresent || 0}</p>
                   <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Attended</p>
                </div>
-               <div className="text-center p-4 bg-slate-950 rounded-xl border border-slate-800">
+               <div className="text-center p-3 bg-slate-950 rounded-xl border border-slate-800">
                   <p className="text-2xl font-black text-white">{studentAnalytics?.totalSessions || 0}</p>
                   <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Sessions</p>
                </div>
@@ -332,27 +340,24 @@ export default function DashboardPage() {
       </div>
       {/* Subject-wise Analytics (Bottom Row) - Only for Students */}
       {userData?.role === 'student' && studentAnalytics && (
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="bg-slate-900 p-6 md:p-8 rounded-lg border border-slate-800 shadow-xl"
-        >
-          <div className="flex items-center justify-between mb-8">
+        <div className="bg-slate-900 p-6 rounded-lg border border-slate-800 shadow-xl">
+          <div className="flex items-center justify-between mb-5">
             <div className="flex items-center gap-3">
               <div className="p-2.5 bg-indigo-600/10 rounded-lg border border-indigo-500/20">
-                <TrendingUp className="text-indigo-500" size={20} />
+                <TrendingUp className="text-indigo-500" size={18} />
               </div>
               <h4 className="text-sm font-bold text-white uppercase tracking-[0.2em]">Subject-wise Analytics</h4>
             </div>
-            <div className="flex items-center gap-2">
-               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest hidden sm:block">Performance Matrix</span>
+            <div className="flex items-center gap-3 text-[9px] font-black uppercase tracking-widest">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block"></span>≥75%</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-yellow-500 inline-block"></span>45–74%</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-rose-500 inline-block"></span>&lt;45%</span>
             </div>
           </div>
 
-          <div className="h-[300px] w-full">
+          <div className="h-[260px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={studentAnalytics.subjectStats}>
+              <BarChart data={studentAnalytics.subjectStats} barCategoryGap="30%">
                 <XAxis 
                   dataKey="name" 
                   stroke="#475569" 
@@ -372,17 +377,15 @@ export default function DashboardPage() {
                   domain={[0, 100]}
                 />
                 <RechartsTooltip 
-                  cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                  cursor={{ fill: 'rgba(255,255,255,0.03)' }}
                   content={({ active, payload }) => {
                     if (active && payload && payload.length) {
-                      const data = payload[0].payload;
+                      const d = payload[0].payload;
                       return (
-                        <div className="bg-slate-950 border border-slate-800 p-3 rounded-lg shadow-2xl backdrop-blur-md">
-                          <p className="text-[10px] font-black text-white uppercase tracking-widest mb-1">{data.name}</p>
-                          <p className="text-xl font-black text-blue-400">{data.percentage}%</p>
-                          <p className="text-[8px] font-bold text-slate-500 uppercase mt-1">
-                            {data.present} / {data.total} Sessions
-                          </p>
+                        <div className="bg-slate-950 border border-slate-800 p-3 rounded-lg shadow-2xl">
+                          <p className="text-[10px] font-black text-white uppercase tracking-widest mb-1">{d.name}</p>
+                          <p className="text-xl font-black" style={{ color: getAttendanceColor(d.percentage) }}>{d.percentage}%</p>
+                          <p className="text-[8px] font-bold text-slate-500 uppercase mt-1">{d.present} / {d.total} Sessions</p>
                         </div>
                       );
                     }
@@ -392,20 +395,21 @@ export default function DashboardPage() {
                 <Bar 
                   dataKey="percentage" 
                   radius={[4, 4, 0, 0]}
-                  barSize={40}
+                  barSize={36}
+                  isAnimationActive={false}
                 >
                   {studentAnalytics.subjectStats.map((entry: any, index: number) => (
                     <Cell 
                       key={`cell-${index}`} 
-                      fill={entry.percentage >= 75 ? "#3b82f6" : "#f43f5e"} 
-                      fillOpacity={0.8}
+                      fill={getAttendanceColor(entry.percentage)}
+                      fillOpacity={0.85}
                     />
                   ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </motion.div>
+        </div>
       )}
 
       {/* Teacher/Default Stats View (Optional fallback or simplified view) */}
