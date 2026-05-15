@@ -441,7 +441,7 @@ export default function DashboardPage() {
                   dataKey="name"
                   fontSize={10}
                   tickLine={false}
-                  axisLine={false}
+                  axisLine={{ stroke: 'transparent' }}
                   tick={{ fill: '#64748b', fontWeight: 600 }}
                   interval={0}
                   tickFormatter={(v) => v.length > 9 ? `${v.substring(0, 9)}…` : v}
@@ -449,7 +449,7 @@ export default function DashboardPage() {
                 <YAxis
                   fontSize={10}
                   tickLine={false}
-                  axisLine={false}
+                  axisLine={{ stroke: 'transparent' }}
                   tick={{ fill: '#64748b', fontWeight: 600 }}
                   domain={[0, 100]}
                   ticks={[0, 25, 50, 75, 100]}
