@@ -134,9 +134,8 @@ export default function DashboardPage() {
       const targetBranch = branch || userData?.branch;
       const targetSem = semester || userData?.semester;
 
-      if (!targetBranch || !targetSem) return;
+      if (!targetBranch || !targetSem || !userData?.regNo) return;
 
-      // 1. Get all sessions for this batch
       // 1. Get official subjects from timetable
       const timetableQ = query(
         collection(db, "timetables"),
@@ -144,58 +143,55 @@ export default function DashboardPage() {
         where("semester", "==", targetSem)
       );
       const timetableSnap = await getDocs(timetableQ);
-      const officialSubjects = new Set(timetableSnap.docs.map(doc => doc.data().subject).filter(Boolean));
+      const officialSubjects = Array.from(
+        new Set(timetableSnap.docs.map(doc => doc.data().subject).filter(Boolean))
+      ) as string[];
 
-      // 2. Get all sessions for this batch and filter by official subjects
-      const sessionsQ = query(
-        collection(db, "smartboardSessions"),
-        where("metadata.branch", "==", targetBranch),
-        where("metadata.semester", "==", targetSem),
-        where("status", "in", ["marking-attendance", "completed"])
-      );
-      const sessionsSnap = await getDocs(sessionsQ);
-      const sessionMap = new Map();
-      sessionsSnap.docs.forEach(doc => {
-        const data = doc.data();
-        if (officialSubjects.has(data.metadata.subject)) {
-          sessionMap.set(doc.id, data);
-        }
+      if (officialSubjects.length === 0) return;
+
+      // 2. Fetch SubjectAttendance/{branch_sem_subject}/dates for each subject in parallel
+      // Same collection as leaderboard & history page
+      const cleanBranch = targetBranch.replace(/[\s/]+/g, '_');
+      const cleanSem = targetSem.replace(/[\s/]+/g, '_');
+
+      const attendancePromises = officialSubjects.map(async (subject: string) => {
+        const cleanSub = subject.replace(/[\s/]+/g, '_');
+        const datesRef = collection(db, "SubjectAttendance", `${cleanBranch}_${cleanSem}_${cleanSub}`, "dates");
+        const snap = await getDocs(datesRef);
+        return { subject, snap };
       });
 
-      // 2. Get student's attendance records
-      const attendanceQ = query(
-        collection(db, "attendance"),
-        where("regNo", "==", userData.regNo)
-      );
-      const attendanceSnap = await getDocs(attendanceQ);
-      const attendanceData = attendanceSnap.docs.map(doc => doc.data());
+      const results = await Promise.all(attendancePromises);
 
-      const subjectStatsMap: any = {};
-      sessionMap.forEach((sess, id) => {
-        const sub = sess.metadata.subject;
-        if (!subjectStatsMap[sub]) {
-          subjectStatsMap[sub] = { name: sub, total: 0, present: 0 };
+      // 3. Build subject-wise stats using attendance[regNo] pattern
+      const subjectStatsMap: Record<string, { name: string; total: number; present: number }> = {};
+
+      results.forEach(({ subject, snap }) => {
+        if (snap.empty) return;
+        if (!subjectStatsMap[subject]) {
+          subjectStatsMap[subject] = { name: subject, total: 0, present: 0 };
         }
-        subjectStatsMap[sub].total += 1;
-        
-        const record = attendanceData.find(a => a.sessionId === id);
-        if (record && record.status === 'present') {
-          subjectStatsMap[sub].present += 1;
-        }
+        snap.forEach(dateDoc => {
+          const data = dateDoc.data();
+          subjectStatsMap[subject].total += 1;
+          if (data.attendance && data.attendance[userData.regNo] === 'present') {
+            subjectStatsMap[subject].present += 1;
+          }
+        });
       });
 
-      const subjectStatsArray = Object.values(subjectStatsMap).map((s: any) => ({
+      const subjectStatsArray = Object.values(subjectStatsMap).map((s) => ({
         ...s,
         percentage: s.total > 0 ? Math.round((s.present / s.total) * 100) : 0
       }));
 
-      // Sum up present counts from the subjectStatsMap for accurate total
       let totalPresent = 0;
-      Object.values(subjectStatsMap).forEach((s: any) => {
+      let totalSessions = 0;
+      Object.values(subjectStatsMap).forEach((s) => {
         totalPresent += s.present;
+        totalSessions += s.total;
       });
-      
-      const totalSessions = sessionMap.size;
+
       const overallPercentage = totalSessions > 0 ? Math.round((totalPresent / totalSessions) * 100) : 0;
 
       setStudentAnalytics({
@@ -208,6 +204,7 @@ export default function DashboardPage() {
       console.error("Analytics Error:", error);
     }
   };
+
 
   const getCurrentSession = () => {
     const nowStr = currentTime.getHours().toString().padStart(2, '0') + ":" + currentTime.getMinutes().toString().padStart(2, '0');
