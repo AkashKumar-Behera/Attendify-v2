@@ -16,7 +16,7 @@ import { collection, query, where, getDocs, getCountFromServer } from "firebase/
 import { db } from "@/lib/firebase";
 import { motion } from "framer-motion";
 import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, Cell, ResponsiveContainer
+  BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, Cell, ResponsiveContainer, LabelList
 } from 'recharts';
 
 // ─── Animated Gauge (SVG-based, no Recharts flash) ────────────────────────────
@@ -134,9 +134,18 @@ export default function DashboardPage() {
   const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const currentDay = days[currentTime.getDay()];
 
+  const [isDesktop, setIsDesktop] = useState(true);
+
   useEffect(() => {
+    const handleResize = () => setIsDesktop(window.innerWidth >= 768);
+    handleResize(); // set initial
+    window.addEventListener('resize', handleResize);
+    
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('resize', handleResize);
+    };
   }, []);
 
   useEffect(() => {
@@ -344,29 +353,27 @@ export default function DashboardPage() {
                         <p className="text-[10px] text-slate-500 font-medium">{studentAnalytics.subjectStats.length} subjects</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2.5 text-[9px] font-bold uppercase tracking-widest text-slate-400">
-                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-500/80 inline-block" />≥75%</span>
-                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-yellow-500/80 inline-block" />45–74%</span>
-                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-rose-500/80 inline-block" />&lt;45%</span>
-                    </div>
                   </div>
 
                   <div className="flex-1 min-h-[200px]">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" className="focus:outline-none" style={{ outline: 'none' }}>
                       <BarChart
                         data={studentAnalytics.subjectStats}
-                        barCategoryGap="35%"
-                        margin={{ top: 4, right: 8, left: -16, bottom: 0 }}
+                        barCategoryGap={isDesktop ? "20%" : "30%"}
+                        margin={{ top: 4, right: 8, left: -16, bottom: isDesktop ? 0 : 4 }}
+                        style={{ outline: 'none' }}
                       >
-                        <XAxis
-                          dataKey="name"
-                          fontSize={10}
-                          tickLine={false}
-                          axisLine={{ stroke: 'transparent' }}
-                          tick={{ fill: '#64748b', fontWeight: 600 }}
-                          interval={0}
-                          tickFormatter={(v) => v.length > 9 ? `${v.substring(0, 9)}…` : v}
-                        />
+                        {isDesktop ? (
+                          <XAxis 
+                            dataKey="name" 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }} 
+                            height={24}
+                          />
+                        ) : (
+                          <XAxis hide />
+                        )}
                         <YAxis
                           fontSize={10}
                           tickLine={false}
@@ -394,12 +401,48 @@ export default function DashboardPage() {
                             return null;
                           }}
                         />
-                        <Bar dataKey="percentage" radius={[5, 5, 0, 0]} barSize={30} isAnimationActive={false}>
+                        <Bar 
+                          dataKey="percentage" 
+                          radius={[5, 5, 0, 0]} 
+                          barSize={isDesktop ? 40 : 32} 
+                          isAnimationActive={false}
+                          activeBar={false}
+                          minPointSize={isDesktop ? 4 : 8}
+                          style={{ outline: 'none' }}
+                        >
+                          {!isDesktop && (
+                            <LabelList
+                              dataKey="name"
+                              content={(props: any) => {
+                                const { x, y, width, height, value } = props;
+                                const text = String(value);
+                                const cx = x + width / 2;
+                                const bottomY = (y + height) - 8;
+                                return (
+                                  <text
+                                    x={cx}
+                                    y={bottomY}
+                                    fill="rgba(255,255,255,0.9)"
+                                    fontSize={10}
+                                    fontWeight={800}
+                                    letterSpacing={0.5}
+                                    textAnchor="start"
+                                    dominantBaseline="middle"
+                                    transform={`rotate(-90 ${cx} ${bottomY})`}
+                                    style={{ pointerEvents: 'none', outline: 'none' }}
+                                  >
+                                    {text}
+                                  </text>
+                                );
+                              }}
+                            />
+                          )}
                           {studentAnalytics.subjectStats.map((entry: any, index: number) => (
                             <Cell
                               key={`cell-${index}`}
                               fill={entry.total === 0 ? "#334155" : getAttendanceColor(entry.percentage)}
                               fillOpacity={entry.total === 0 ? 0.5 : 0.9}
+                              style={{ outline: 'none' }}
                             />
                           ))}
                         </Bar>
@@ -407,12 +450,20 @@ export default function DashboardPage() {
                     </ResponsiveContainer>
                   </div>
 
-                  {studentAnalytics.subjectStats.some(s => s.total === 0) && (
-                    <p className="text-[9px] text-slate-600 font-medium mt-1 text-right">
-                      <span className="inline-block w-1.5 h-1.5 rounded bg-slate-700 mr-1 align-middle" />
-                      Grey = No classes held yet
-                    </p>
-                  )}
+                  {/* Footer Legends */}
+                  <div className="flex items-center justify-between mt-3 px-1">
+                    <div className="flex items-center gap-2.5 text-[9px] font-bold uppercase tracking-widest text-slate-400">
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-500/80 inline-block" />≥75%</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-yellow-500/80 inline-block" />45–74%</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-rose-500/80 inline-block" />&lt;45%</span>
+                    </div>
+                    {studentAnalytics.subjectStats.some(s => s.total === 0) && (
+                      <p className="text-[9px] text-slate-500 font-medium text-right uppercase tracking-widest">
+                        <span className="inline-block w-1.5 h-1.5 rounded bg-slate-700 mr-1 align-middle" />
+                        No classes yet
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
