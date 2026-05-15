@@ -19,6 +19,18 @@ This file serves as a persistent memory and activity log for all AI agents (Gemi
 
 ---
 
+### [2026-05-15 19:15] | Agent: Antigravity | Task: Role-Based Search Restriction & Leaderboard Optimization | Status: Done
+- **Timetable Page**: Hidden the subject search bar in the leaderboard for students.
+- **Issue #9 Resolved**: Refined subject filtering in the leaderboard for teachers; now correctly switches between "My Classes" and "All Classes" subject lists.
+- **Filtering Logic**: Reinforced semester/branch filtering for subjects across all roles.
+- **Verification**: Confirmed search-free student experience across all dashboard modules.
+
+### [2026-05-15 19:00] | Agent: Antigravity | Task: Timetable Performance & Subject Selection Optimization | Status: Done
+- **Data Fetching Overhaul**: Parallelized Firestore requests for Leaderboards and Configs, reducing dashboard load times and latency.
+- **Search Refinement**: Standardized and optimized the "Quick find" search bar layout across Add/Edit modals with consistent width and glassmorphism styling.
+- **Query Optimization**: Migrated student filtering from client-side to server-side (Firestore) to handle larger datasets efficiently.
+- **Build Stability**: Verified the entire codebase with `tsc --noEmit` to ensure no regressions in the Cyber-Noir Admin Suite.
+
 ### [2026-05-15 18:45] | Agent: Antigravity | Task: Timetable Modal UX & Search Stabilization | Status: Done
 - **Layout Refinement**: Optimized the search bar position next to the subject label with a Cyber-Noir glassmorphism aesthetic.
 - **Categorization & Sorting**: Implemented `<optgroup>` for Theory vs Labs and applied alphabetical sorting to all subject lists.

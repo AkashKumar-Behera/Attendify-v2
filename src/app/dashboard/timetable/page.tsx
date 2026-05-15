@@ -56,6 +56,7 @@ export default function TimetablePage() {
   const [editSubjectSearch, setEditSubjectSearch] = useState("");
   const [editingSlot, setEditingSlot] = useState<any | null>(null);
   const [timetable, setTimetable] = useState<any[]>([]);
+  const [availableSubjects, setAvailableSubjects] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Leaderboard State
@@ -94,6 +95,9 @@ export default function TimetablePage() {
     if (isPersonalMode || (selectedBranch && selectedSem)) {
       fetchTimetable();
     }
+    if (selectedBranch && selectedSem) {
+      fetchAvailableSubjects();
+    }
   }, [selectedDay, selectedBranch, selectedSem, isPersonalMode]);
 
   // Fetch leaderboard data when active tab changes to leaderboard
@@ -109,30 +113,45 @@ export default function TimetablePage() {
     setLeaderboardData([]);
     
     try {
-      // 1. Get batch prefix and mapping
-      const bQuery = query(collection(db, "batchMappings"), 
-         where("branch", "==", selectedBranch),
-         where("semester", "==", selectedSem)
-      );
-      const bSnap = await getDocs(bQuery);
-      let mapping: any = null;
-      let prefix = "";
-      if (!bSnap.empty) {
-         mapping = bSnap.docs[0].data();
-         prefix = mapping.prefix;
+      // 1. Get batch prefix and mapping from state or fetch if missing
+      let mapping = batchMappings.find(m => m.branch === selectedBranch && m.semester === selectedSem);
+      
+      if (!mapping) {
+         const bQuery = query(collection(db, "batchMappings"), 
+            where("branch", "==", selectedBranch),
+            where("semester", "==", selectedSem)
+         );
+         const bSnap = await getDocs(bQuery);
+         if (!bSnap.empty) {
+            mapping = { id: bSnap.docs[0].id, ...bSnap.docs[0].data() };
+         }
       }
 
-      if (!prefix) {
+      if (!mapping || !mapping.prefix) {
          setLoadingLeaderboard(false);
          return;
       }
 
-      // Helper to resolve student meta for filtering
+      const prefix = mapping.prefix;
+
+      // 2. Get Students (Optimized Query - filter by prefix in Firestore if possible)
+      // Note: We use regNo range to filter for students in the specific batch
+      const usersRef = collection(db, "users");
+      const q = query(
+        usersRef, 
+        where("role", "==", "student"),
+        where("regNo", ">=", prefix),
+        where("regNo", "<=", prefix + "\uf8ff")
+      );
+      const snapshot = await getDocs(q);
+      const studentsInBranch = snapshot.docs.map(doc => doc.data());
+
+      // 3. Resolve student meta and filter by section/group in memory
       const resolveStudentMeta = (u: any) => {
         let sectionMatch = "N/A";
         let groupMatch = "N/A";
         
-        if (mapping && mapping.sections) {
+        if (mapping && mapping.sections && u.regNo) {
            const numericSuffix = parseInt(u.regNo.substring(8), 10);
            if (!isNaN(numericSuffix)) {
               for (const sec of mapping.sections) {
@@ -154,30 +173,18 @@ export default function TimetablePage() {
         return { section: sectionMatch, group: groupMatch };
       };
 
-      // 2. Get Students
-      const usersRef = collection(db, "users");
-      const q = query(usersRef, where("role", "==", "student"));
-      const snapshot = await getDocs(q);
-      const allStudents = snapshot.docs.map(doc => doc.data());
-      let filteredStudents = allStudents.filter(s => s.regNo?.startsWith(prefix));
+      const filteredStudents = studentsInBranch.filter(s => {
+        const meta = resolveStudentMeta(s);
+        const sectionOk = leaderboardSection === "All" || meta.section === leaderboardSection;
+        const groupOk = leaderboardGroup === "All" || meta.group === leaderboardGroup;
+        return sectionOk && groupOk;
+      });
 
-      // Filter by section and group if not "All"
-      if (leaderboardSection !== "All") {
-        filteredStudents = filteredStudents.filter(s => resolveStudentMeta(s).section === leaderboardSection);
-      }
-      if (leaderboardGroup !== "All") {
-        filteredStudents = filteredStudents.filter(s => resolveStudentMeta(s).group === leaderboardGroup);
-      }
-
-      // 3. Get Subjects for this branch
-      const subSnap = await getDocs(collection(db, "subjects"));
-      let relevantSubjects = subSnap.docs
-        .map(doc => doc.data())
-        .filter(s => s.branch === selectedBranch)
-        .map(s => s.name);
+      // 4. Get relevant subjects from timetable-based availableSubjects
+      let relevantSubjects = [...availableSubjects];
 
       if (leaderboardSubject !== "All") {
-         relevantSubjects = relevantSubjects.filter(s => s === leaderboardSubject);
+         relevantSubjects = [leaderboardSubject];
       }
 
       const studentStats: Record<string, { present: number, total: number, name: string }> = {};
@@ -185,18 +192,27 @@ export default function TimetablePage() {
          studentStats[s.regNo] = { present: 0, total: 0, name: s.name || s.regNo };
       });
 
-      // 4. Fetch Attendance Dates for each subject
-      for (const subject of relevantSubjects) {
-         const cleanBranch = selectedBranch.replace(/\s+/g, '_');
-         const cleanSem = selectedSem.replace(/\s+/g, '_');
-         const cleanSub = subject.replace(/\s+/g, '_');
-         
-         const datesRef = collection(db, "SubjectAttendance", `${cleanBranch}_${cleanSem}_${cleanSub}`, "dates");
-         const datesSnap = await getDocs(datesRef);
-         
+      if (relevantSubjects.length === 0) {
+        setLoadingLeaderboard(false);
+        return;
+      }
+
+      // 5. Fetch Attendance Dates for each subject in PARALLEL
+      const cleanBranch = selectedBranch.replace(/[\s/]+/g, '_');
+      const cleanSem = selectedSem.replace(/[\s/]+/g, '_');
+      
+      const attendancePromises = relevantSubjects.map(async (subject) => {
+        const cleanSub = subject.replace(/[\s/]+/g, '_');
+        const datesRef = collection(db, "SubjectAttendance", `${cleanBranch}_${cleanSem}_${cleanSub}`, "dates");
+        return getDocs(datesRef);
+      });
+
+      const datesSnapshots = await Promise.all(attendancePromises);
+
+      datesSnapshots.forEach(datesSnap => {
          datesSnap.forEach(doc => {
             const data = doc.data();
-            // Count for each student
+            // Optimization: Only iterate over studentStats keys once per date document
             Object.keys(studentStats).forEach(regNo => {
                studentStats[regNo].total += 1;
                if (data.attendance && data.attendance[regNo] === 'present') {
@@ -204,9 +220,9 @@ export default function TimetablePage() {
                }
             });
          });
-      }
+      });
 
-      // Calculate percentage and sort
+      // 6. Calculate percentage and sort
       const leaderboard = Object.entries(studentStats)
         .map(([regNo, stats]) => {
            const percentage = stats.total > 0 ? (stats.present / stats.total) * 100 : 0;
@@ -219,7 +235,7 @@ export default function TimetablePage() {
            };
         })
         .filter(s => s.total > 0) // Only show students who had classes
-        .sort((a, b) => b.percentage - a.percentage || b.total - a.total); // Sort by % then total classes
+        .sort((a, b) => b.percentage - a.percentage || b.total - a.total);
 
       setLeaderboardData(leaderboard);
     } catch (error) {
@@ -230,10 +246,13 @@ export default function TimetablePage() {
   };
 
   const fetchConfigs = async () => {
-    const bSnap = await getDocs(collection(db, "branches"));
-    const sSnap = await getDocs(collection(db, "semesters"));
-    const subSnap = await getDocs(collection(db, "subjects"));
-    const teacherSnap = await getDocs(query(collection(db, "users"), where("role", "==", "teacher")));
+    const [bSnap, sSnap, subSnap, teacherSnap, mSnap] = await Promise.all([
+      getDocs(collection(db, "branches")),
+      getDocs(collection(db, "semesters")),
+      getDocs(collection(db, "subjects")),
+      getDocs(query(collection(db, "users"), where("role", "==", "teacher"))),
+      getDocs(collection(db, "batchMappings"))
+    ]);
     
     const bData = bSnap.docs.map(doc => doc.data().name as string).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     const sData = sSnap.docs.map(doc => doc.data().name as string).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
@@ -245,11 +264,9 @@ export default function TimetablePage() {
       name: doc.data().name as string, 
       branch: doc.data().branch as string 
     }));
-    const mSnap = await getDocs(collection(db, "batchMappings"));
     const mData = mSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     
     setBatchMappings(mData);
-
     setBranches(bData);
     setSems(sData);
     setAllSubjects(subjectsData);
@@ -318,6 +335,37 @@ export default function TimetablePage() {
       setTimetable([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchAvailableSubjects = async () => {
+    if (!selectedBranch || !selectedSem) return;
+    try {
+      let q;
+      if (isPersonalMode && userData?.name && userData?.role === 'teacher') {
+        q = query(
+          collection(db, "timetables"),
+          where("branch", "==", selectedBranch),
+          where("semester", "==", selectedSem),
+          where("teacher", "==", userData.name)
+        );
+      } else {
+        q = query(
+          collection(db, "timetables"),
+          where("branch", "==", selectedBranch),
+          where("semester", "==", selectedSem)
+        );
+      }
+      
+      const snap = await getDocs(q);
+      const subjects = new Set<string>();
+      snap.forEach(doc => {
+        const data = doc.data();
+        if (data.subject) subjects.add(data.subject);
+      });
+      setAvailableSubjects(Array.from(subjects).sort());
+    } catch (error) {
+      console.error("Error fetching available subjects:", error);
     }
   };
 
@@ -668,9 +716,23 @@ export default function TimetablePage() {
             className="flex-1 overflow-hidden flex flex-col space-y-4"
           >
             {/* Leaderboard Filters */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-slate-900/50 backdrop-blur-xl rounded-lg border border-white/5">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-400">Subject</label>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 p-4 bg-slate-900/50 backdrop-blur-xl rounded-lg border border-white/5">
+              <div className="sm:col-span-2 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-400">Subject</label>
+                  {userData?.role !== 'student' && (
+                    <div className="flex items-center gap-2 px-2 py-0.5 bg-slate-950/50 rounded-md border border-white/5 focus-within:border-blue-500/30 transition-all">
+                      <Search size={12} className="text-slate-500" />
+                      <input 
+                        type="text" 
+                        placeholder="Search subject..."
+                        value={subjectSearch}
+                        onChange={(e) => setSubjectSearch(e.target.value)}
+                        className="bg-transparent border-none focus:outline-none text-[10px] text-slate-300 w-24 placeholder:text-slate-600"
+                      />
+                    </div>
+                  )}
+                </div>
                 <div className="relative">
                   <select 
                     value={leaderboardSubject}
@@ -678,9 +740,30 @@ export default function TimetablePage() {
                     className="w-full bg-slate-950/80 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500/50 appearance-none"
                   >
                     <option value="All">All Subjects</option>
-                    {allSubjects.filter(s => s.branch === selectedBranch).map((s, idx) => (
-                      <option key={`sub-filter-${idx}`} value={s.name}>{s.name}</option>
-                    ))}
+                    {(() => {
+                      const filtered = availableSubjects.filter(s => s.toLowerCase().includes(subjectSearch.toLowerCase()));
+                      const theory = filtered.filter(s => !s.toLowerCase().includes('lab'));
+                      const labs = filtered.filter(s => s.toLowerCase().includes('lab'));
+                      
+                      return (
+                        <>
+                          {theory.length > 0 && (
+                            <optgroup label="Theory" className="bg-slate-900 text-blue-400 font-bold">
+                              {theory.map((sub, idx) => (
+                                <option key={`sub-filter-th-${idx}`} value={sub} className="bg-slate-950 text-white font-normal">{sub}</option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {labs.length > 0 && (
+                            <optgroup label="Labs" className="bg-slate-900 text-emerald-400 font-bold">
+                              {labs.map((sub, idx) => (
+                                <option key={`sub-filter-lab-${idx}`} value={sub} className="bg-slate-950 text-white font-normal">{sub}</option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </>
+                      );
+                    })()}
                   </select>
                   <ChevronRight size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 rotate-90 pointer-events-none" />
                 </div>
@@ -895,64 +978,68 @@ export default function TimetablePage() {
                  </div>
 
                   <div className="space-y-1.5">
-                     <div className="flex items-center justify-between mb-1.5">
-                        <label className="text-xs font-semibold text-slate-400 flex items-center gap-2">
-                           <BookOpen size={14} className="text-emerald-400" />
-                           Subject
-                        </label>
+                     <label className="text-xs font-semibold text-slate-400 flex items-center gap-2">
+                        <BookOpen size={14} className="text-emerald-400" />
+                        Subject Selection
+                     </label>
+                     <div className="flex flex-col sm:flex-row gap-2">
+                        <div className="flex-1 relative">
+                           <select 
+                             value={newSlot.subject}
+                             onChange={e => setNewSlot({...newSlot, subject: e.target.value})}
+                             className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 transition-all appearance-none"
+                           >
+                              {!newSlot.branch ? (
+                                <option value="">Select Branch First</option>
+                              ) : (
+                                <>
+                                  <option value="">Select Subject</option>
+                                  {(() => {
+                                    const filtered = allSubjects
+                                      .filter((s: any) => s.branch === newSlot.branch && (!s.semester || s.semester === newSlot.semester) && s.name.toLowerCase().includes(subjectSearch.toLowerCase()))
+                                      .sort((a: any, b: any) => a.name.localeCompare(b.name));
+                                    
+                                    const theory = filtered.filter((s: any) => !s.name.toLowerCase().includes('lab'));
+                                    const labs = filtered.filter((s: any) => s.name.toLowerCase().includes('lab'));
+
+                                    return (
+                                      <>
+                                        {theory.length > 0 && (
+                                          <optgroup label="Theory Subjects" className="bg-slate-900 text-blue-400 font-bold">
+                                            {theory.map((s: any, idx: number) => (
+                                              <option key={`edit-sub-th-${idx}`} value={s.name} className="bg-slate-950 text-white font-normal">{s.name}</option>
+                                            ))}
+                                          </optgroup>
+                                        )}
+                                        {labs.length > 0 && (
+                                          <optgroup label="Labs / Practicals" className="bg-slate-900 text-emerald-400 font-bold">
+                                            {labs.map((s: any, idx: number) => (
+                                              <option key={`edit-sub-lab-${idx}`} value={s.name} className="bg-slate-950 text-white font-normal">{s.name}</option>
+                                            ))}
+                                          </optgroup>
+                                        )}
+                                      </>
+                                    );
+                                  })()}
+                                </>
+                              )}
+                           </select>
+                           <ChevronRight size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 rotate-90 pointer-events-none" />
+                        </div>
+                        
                         {newSlot.branch && (
-                          <div className="flex items-center gap-2 bg-slate-950/50 rounded-md border border-white/10 px-2 py-1 focus-within:border-emerald-500/50 transition-all group">
-                            <Search size={12} className="text-slate-500 group-focus-within:text-emerald-400 transition-colors" />
-                            <input 
-                              type="text"
-                              placeholder="Search subject..."
-                              value={subjectSearch}
-                              onChange={(e) => setSubjectSearch(e.target.value)}
-                              className="bg-transparent border-none focus:outline-none text-xs text-slate-300 w-32 md:w-40 placeholder:text-slate-600"
-                            />
-                          </div>
+                           <div className="flex items-center gap-2 bg-slate-950 border border-white/10 px-3 py-2 rounded-lg focus-within:border-emerald-500/50 transition-all w-full sm:w-48">
+                              <Search size={14} className="text-slate-500" />
+                              <input 
+                                type="text"
+                                placeholder="Search..."
+                                value={subjectSearch}
+                                onChange={(e) => setSubjectSearch(e.target.value)}
+                                className="bg-transparent border-none focus:outline-none text-sm text-slate-300 w-full placeholder:text-slate-600"
+                              />
+                           </div>
                         )}
                      </div>
-                     <select 
-                       value={newSlot.subject}
-                       onChange={e => setNewSlot({...newSlot, subject: e.target.value})}
-                       className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500 transition-all"
-                     >
-                        {!newSlot.branch ? (
-                          <option value="">Select Branch First</option>
-                        ) : (
-                          <>
-                            <option value="">Select Subject</option>
-                            {(() => {
-                              const filtered = allSubjects
-                                .filter((s: any) => s.branch === newSlot.branch && s.name.toLowerCase().includes(subjectSearch.toLowerCase()))
-                                .sort((a: any, b: any) => a.name.localeCompare(b.name));
-                              
-                              const theory = filtered.filter((s: any) => !s.name.toLowerCase().includes('lab'));
-                              const labs = filtered.filter((s: any) => s.name.toLowerCase().includes('lab'));
-
-                              return (
-                                <>
-                                  {theory.length > 0 && (
-                                    <optgroup label="Theory Subjects" className="bg-slate-900 text-blue-400 font-bold">
-                                      {theory.map((s: any, idx: number) => (
-                                        <option key={`modal-sub-th-${idx}`} value={s.name} className="bg-slate-950 text-white font-normal">{s.name}</option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                  {labs.length > 0 && (
-                                    <optgroup label="Labs / Practicals" className="bg-slate-900 text-emerald-400 font-bold">
-                                      {labs.map((s: any, idx: number) => (
-                                        <option key={`modal-sub-lab-${idx}`} value={s.name} className="bg-slate-950 text-white font-normal">{s.name}</option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                </>
-                              );
-                            })()}
-                          </>
-                        )}
-                     </select>
                   </div>
 
                  <div className="grid grid-cols-2 gap-4">
@@ -1136,66 +1223,70 @@ export default function TimetablePage() {
                     </div>
                  </div>
 
-                 <div className="space-y-1.5">
-                    <div className="flex items-center justify-between mb-1.5">
-                       <label className="text-xs font-semibold text-slate-400 flex items-center gap-2">
-                          <BookOpen size={14} className="text-emerald-400" />
-                          Subject
-                       </label>
-                       {editingSlot.branch && (
-                         <div className="flex items-center gap-2 bg-slate-950/50 rounded-md border border-white/10 px-2 py-1 focus-within:border-emerald-500/50 transition-all group">
-                           <Search size={12} className="text-slate-500 group-focus-within:text-emerald-400 transition-colors" />
-                           <input 
-                             type="text"
-                             placeholder="Search subject..."
-                             value={editSubjectSearch}
-                             onChange={(e) => setEditSubjectSearch(e.target.value)}
-                             className="bg-transparent border-none focus:outline-none text-xs text-slate-300 w-32 md:w-40 placeholder:text-slate-600"
-                           />
-                         </div>
-                       )}
-                    </div>
-                    <select 
-                      value={editingSlot.subject}
-                      onChange={e => setEditingSlot({...editingSlot, subject: e.target.value})}
-                      className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500 transition-all"
-                    >
-                       {!editingSlot.branch ? (
-                         <option value="">Select Branch First</option>
-                       ) : (
-                         <>
-                           <option value="">Select Subject</option>
-                           {(() => {
-                             const filtered = allSubjects
-                               .filter((s: any) => s.branch === editingSlot.branch && s.name.toLowerCase().includes(editSubjectSearch.toLowerCase()))
-                               .sort((a: any, b: any) => a.name.localeCompare(b.name));
-                             
-                             const theory = filtered.filter((s: any) => !s.name.toLowerCase().includes('lab'));
-                             const labs = filtered.filter((s: any) => s.name.toLowerCase().includes('lab'));
+                  <div className="space-y-1.5">
+                     <label className="text-xs font-semibold text-slate-400 flex items-center gap-2">
+                        <BookOpen size={14} className="text-emerald-400" />
+                        Subject Selection
+                     </label>
+                     <div className="flex flex-col sm:flex-row gap-2">
+                        <div className="flex-1 relative">
+                           <select 
+                             value={editingSlot.subject}
+                             onChange={e => setEditingSlot({...editingSlot, subject: e.target.value})}
+                             className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 transition-all appearance-none"
+                           >
+                              {!editingSlot.branch ? (
+                                <option value="">Select Branch First</option>
+                              ) : (
+                                <>
+                                  <option value="">Select Subject</option>
+                                  {(() => {
+                                    const filtered = allSubjects
+                                      .filter((s: any) => s.branch === editingSlot.branch && (!s.semester || s.semester === editingSlot.semester) && s.name.toLowerCase().includes(editSubjectSearch.toLowerCase()))
+                                      .sort((a: any, b: any) => a.name.localeCompare(b.name));
+                                    
+                                    const theory = filtered.filter((s: any) => !s.name.toLowerCase().includes('lab'));
+                                    const labs = filtered.filter((s: any) => s.name.toLowerCase().includes('lab'));
 
-                             return (
-                               <>
-                                 {theory.length > 0 && (
-                                   <optgroup label="Theory Subjects" className="bg-slate-900 text-blue-400 font-bold">
-                                     {theory.map((s: any, idx: number) => (
-                                       <option key={`edit-sub-th-${idx}`} value={s.name} className="bg-slate-950 text-white font-normal">{s.name}</option>
-                                     ))}
-                                   </optgroup>
-                                 )}
-                                 {labs.length > 0 && (
-                                   <optgroup label="Labs / Practicals" className="bg-slate-900 text-emerald-400 font-bold">
-                                     {labs.map((s: any, idx: number) => (
-                                       <option key={`edit-sub-lab-${idx}`} value={s.name} className="bg-slate-950 text-white font-normal">{s.name}</option>
-                                     ))}
-                                   </optgroup>
-                                 )}
-                               </>
-                             );
-                           })()}
-                         </>
-                       )}
-                    </select>
-                 </div>
+                                    return (
+                                      <>
+                                        {theory.length > 0 && (
+                                          <optgroup label="Theory Subjects" className="bg-slate-900 text-blue-400 font-bold">
+                                            {theory.map((s: any, idx: number) => (
+                                              <option key={`edit-sub-th-${idx}`} value={s.name} className="bg-slate-950 text-white font-normal">{s.name}</option>
+                                            ))}
+                                          </optgroup>
+                                        )}
+                                        {labs.length > 0 && (
+                                          <optgroup label="Labs / Practicals" className="bg-slate-900 text-emerald-400 font-bold">
+                                            {labs.map((s: any, idx: number) => (
+                                              <option key={`edit-sub-lab-${idx}`} value={s.name} className="bg-slate-950 text-white font-normal">{s.name}</option>
+                                            ))}
+                                          </optgroup>
+                                        )}
+                                      </>
+                                    );
+                                  })()}
+                                </>
+                              )}
+                           </select>
+                           <ChevronRight size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 rotate-90 pointer-events-none" />
+                        </div>
+                        
+                        {editingSlot.branch && (
+                           <div className="flex items-center gap-2 bg-slate-950 border border-white/10 px-3 py-2 rounded-lg focus-within:border-emerald-500/50 transition-all w-full sm:w-48">
+                              <Search size={14} className="text-slate-500" />
+                              <input 
+                                type="text"
+                                placeholder="Search..."
+                                value={editSubjectSearch}
+                                onChange={(e) => setEditSubjectSearch(e.target.value)}
+                                className="bg-transparent border-none focus:outline-none text-sm text-slate-300 w-full placeholder:text-slate-600"
+                              />
+                           </div>
+                        )}
+                     </div>
+                  </div>
 
                  <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
