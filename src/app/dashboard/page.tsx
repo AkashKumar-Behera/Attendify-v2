@@ -61,18 +61,35 @@ export default function DashboardPage() {
     setLoading(true);
     try {
       let q;
+      let branch = userData?.branch;
+      let semester = userData?.semester;
+
+      // If student and branch/semester missing, derive from prefix
+      if (userData?.role === 'student' && (!branch || !semester)) {
+         const prefix = userData.regNo?.substring(0, 8); // Standard 8-char prefix
+         if (prefix) {
+            const mQuery = query(collection(db, "batchMappings"), where("prefix", "==", prefix));
+            const mSnap = await getDocs(mQuery);
+            if (!mSnap.empty) {
+               const mapping = mSnap.docs[0].data();
+               branch = mapping.branch;
+               semester = mapping.semester;
+            }
+         }
+      }
+
       if (userData?.role === 'teacher') {
         q = query(
           collection(db, "timetables"),
           where("day", "==", currentDay),
           where("teacher", "==", userData.name)
         );
-      } else if (userData?.role === 'student' && userData.branch && userData.semester) {
+      } else if (userData?.role === 'student' && branch && semester) {
         q = query(
           collection(db, "timetables"),
           where("day", "==", currentDay),
-          where("branch", "==", userData.branch),
-          where("semester", "==", userData.semester)
+          where("branch", "==", branch),
+          where("semester", "==", semester)
         );
       } else {
         setLoading(false);
@@ -102,7 +119,7 @@ export default function DashboardPage() {
       setStats(baseStats);
 
       if (userData?.role === 'student' && userData.regNo) {
-        fetchStudentAnalytics();
+        fetchStudentAnalytics(branch, semester);
       }
 
     } catch (error) {
@@ -112,18 +129,38 @@ export default function DashboardPage() {
     }
   };
 
-  const fetchStudentAnalytics = async () => {
+  const fetchStudentAnalytics = async (branch?: string, semester?: string) => {
     try {
+      const targetBranch = branch || userData?.branch;
+      const targetSem = semester || userData?.semester;
+
+      if (!targetBranch || !targetSem) return;
+
       // 1. Get all sessions for this batch
+      // 1. Get official subjects from timetable
+      const timetableQ = query(
+        collection(db, "timetables"),
+        where("branch", "==", targetBranch),
+        where("semester", "==", targetSem)
+      );
+      const timetableSnap = await getDocs(timetableQ);
+      const officialSubjects = new Set(timetableSnap.docs.map(doc => doc.data().subject).filter(Boolean));
+
+      // 2. Get all sessions for this batch and filter by official subjects
       const sessionsQ = query(
         collection(db, "smartboardSessions"),
-        where("metadata.branch", "==", userData.branch),
-        where("metadata.semester", "==", userData.semester),
+        where("metadata.branch", "==", targetBranch),
+        where("metadata.semester", "==", targetSem),
         where("status", "in", ["marking-attendance", "completed"])
       );
       const sessionsSnap = await getDocs(sessionsQ);
       const sessionMap = new Map();
-      sessionsSnap.docs.forEach(doc => sessionMap.set(doc.id, doc.data()));
+      sessionsSnap.docs.forEach(doc => {
+        const data = doc.data();
+        if (officialSubjects.has(data.metadata.subject)) {
+          sessionMap.set(doc.id, data);
+        }
+      });
 
       // 2. Get student's attendance records
       const attendanceQ = query(
@@ -152,7 +189,12 @@ export default function DashboardPage() {
         percentage: s.total > 0 ? Math.round((s.present / s.total) * 100) : 0
       }));
 
-      const totalPresent = attendanceData.filter(a => a.status === 'present').length;
+      // Sum up present counts from the subjectStatsMap for accurate total
+      let totalPresent = 0;
+      Object.values(subjectStatsMap).forEach((s: any) => {
+        totalPresent += s.present;
+      });
+      
       const totalSessions = sessionMap.size;
       const overallPercentage = totalSessions > 0 ? Math.round((totalPresent / totalSessions) * 100) : 0;
 
@@ -180,214 +222,11 @@ export default function DashboardPage() {
       animate={{ opacity: 1, y: 0 }}
       className="max-w-7xl mx-auto space-y-6 md:space-y-8 animate-in fade-in duration-500 pb-12"
     >
-      {/* Header */}
-      <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 md:p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-xl">
-        <div className="flex items-center gap-4 md:gap-6">
-          <div className="p-3 md:p-4 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
-            <TrendingUp size={28} className="text-indigo-400" />
-          </div>
-          <div>
-            <h2 className="text-2xl md:text-3xl font-bold text-white">Dashboard Overview</h2>
-            <p className="text-sm text-slate-400 mt-1 flex items-center gap-2">
-              <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
-              {currentDay}, {currentTime.toLocaleDateString()}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex flex-col items-start md:items-end">
-          <div className="text-3xl md:text-4xl font-bold text-white tabular-nums flex items-baseline gap-1">
-            {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
-            <span className="text-lg md:text-xl text-slate-500">:{currentTime.getSeconds().toString().padStart(2, '0')}</span>
-          </div>
-          <p className="text-xs font-medium text-emerald-400 mt-1">System Online</p>
-        </div>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        {stats.map((stat, idx) => (
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: idx * 0.05 }}
-            key={stat.name} 
-          >
-            <div className="bg-slate-900 p-6 rounded-lg border border-slate-800 hover:border-slate-700 transition shadow-lg h-full">
-              <div className="flex items-center justify-between mb-4">
-                <div className={`p-3 rounded-lg ${stat.bg} ${stat.color} border ${stat.border}`}>
-                  <stat.icon size={20} />
-                </div>
-                <div className="text-right">
-                  <span className="text-2xl font-bold text-white tabular-nums">
-                    {stat.name === "Today's Classes" ? todaySchedule.length : stat.value}
-                  </span>
-                </div>
-              </div>
-              <p className="text-sm font-medium text-slate-400">{stat.name}</p>
-            </div>
-          </motion.div>
-        ))}
-      </div>
-
-      {/* Main Grid: Analytics & Schedule */}
+      {/* Top Row: Timetable (Left) & Attendance Gauge (Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
-        
-        {/* Left Column: Analytics (Student Only) */}
-        {userData?.role === 'student' && (
-          <div className="lg:col-span-8 space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-               {/* Gauge Chart Card */}
-               <div className="bg-slate-900 p-6 rounded-lg border border-slate-800 shadow-xl flex flex-col items-center">
-                  <div className="w-full flex justify-between items-center mb-4">
-                     <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Attendance Health</h4>
-                     <TrendingUp size={16} className="text-emerald-400" />
-                  </div>
-                  <div className="relative w-full h-[180px]">
-                     <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                           <Pie
-                              data={[
-                                 { value: studentAnalytics?.percentage || 0 },
-                                 { value: 100 - (studentAnalytics?.percentage || 0) }
-                              ]}
-                              cx="50%"
-                              cy="100%"
-                              startAngle={180}
-                              endAngle={0}
-                              innerRadius="110%"
-                              outerRadius="140%"
-                              paddingAngle={0}
-                              dataKey="value"
-                           >
-                              <Cell fill={studentAnalytics && studentAnalytics.percentage >= 75 ? "#10b981" : "#f43f5e"} />
-                              <Cell fill="#1e293b" />
-                           </Pie>
-                        </PieChart>
-                     </ResponsiveContainer>
-                     <div className="absolute inset-0 flex flex-col items-center justify-end pb-2">
-                        <span className="text-4xl font-black text-white">{studentAnalytics?.percentage || 0}%</span>
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Total Average</span>
-                     </div>
-                  </div>
-                  <div className="grid grid-cols-2 w-full gap-4 mt-6">
-                     <div className="text-center p-3 bg-slate-950 rounded-xl border border-slate-800">
-                        <p className="text-lg font-black text-white">{studentAnalytics?.totalPresent || 0}</p>
-                        <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Attended</p>
-                     </div>
-                     <div className="text-center p-3 bg-slate-950 rounded-xl border border-slate-800">
-                        <p className="text-lg font-black text-white">{studentAnalytics?.totalSessions || 0}</p>
-                        <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Total Sessions</p>
-                     </div>
-                  </div>
-               </div>
-
-               {/* Bar Graph Card */}
-               <div className="bg-slate-900 p-6 rounded-lg border border-slate-800 shadow-xl flex flex-col">
-                  <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-6 text-center">Subject-wise Analytics</h4>
-                  <div className="flex-1 h-[200px]">
-                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={studentAnalytics?.subjectStats || []}>
-                           <XAxis 
-                              dataKey="name" 
-                              hide 
-                           />
-                           <YAxis hide domain={[0, 100]} />
-                           <RechartsTooltip 
-                              cursor={{fill: 'transparent'}}
-                              content={({ active, payload }) => {
-                                 if (active && payload && payload.length) {
-                                    return (
-                                       <div className="bg-slate-950 border border-slate-800 p-2 rounded shadow-xl">
-                                          <p className="text-[10px] font-black text-white uppercase">{payload[0].payload.name}</p>
-                                          <p className="text-[10px] font-bold text-blue-400">{payload[0].value}% Attendance</p>
-                                       </div>
-                                    );
-                                 }
-                                 return null;
-                              }}
-                           />
-                           <Bar dataKey="percentage" radius={[4, 4, 0, 0]}>
-                              {(studentAnalytics?.subjectStats || []).map((entry, index) => (
-                                 <Cell key={`cell-${index}`} fill={entry.percentage >= 75 ? "#3b82f6" : "#f43f5e"} fillOpacity={0.8} />
-                              ))}
-                           </Bar>
-                        </BarChart>
-                     </ResponsiveContainer>
-                  </div>
-                  <div className="mt-4 flex flex-wrap justify-center gap-2">
-                     {(studentAnalytics?.subjectStats || []).slice(0, 3).map((sub, i) => (
-                        <span key={i} className="px-2 py-1 bg-slate-950 border border-slate-800 rounded text-[8px] font-bold text-slate-400 uppercase">
-                           {sub.name.substring(0, 8)}...
-                        </span>
-                     ))}
-                  </div>
-               </div>
-            </div>
-
-            {/* Current Class (Moved here for Student) */}
-            <div className="bg-slate-900 p-6 rounded-lg border border-slate-800 shadow-xl h-fit">
-               <div className="flex items-center justify-between mb-8">
-                  <div className="flex items-center gap-3">
-                     <div className="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-ping"></div>
-                     <h4 className="text-lg font-semibold text-white">Current Class</h4>
-                  </div>
-               </div>
-
-               {loading ? (
-                  <div className="flex flex-col items-center justify-center gap-4 py-12">
-                     <div className="w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                  </div>
-               ) : currentSession ? (
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
-                     <div className="space-y-6 flex-1">
-                        <div>
-                           <h2 className="text-3xl font-bold text-white leading-tight">{currentSession.subject}</h2>
-                           <p className="text-sm text-slate-400 mt-2 flex items-center gap-2">
-                              <Database size={16} className="text-indigo-400" />
-                              Active Session Detected
-                           </p>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                           <div className="p-4 bg-slate-950 rounded-lg border border-slate-800">
-                              <p className="text-[10px] text-slate-500 uppercase font-black mb-1">Teacher</p>
-                              <p className="text-sm font-bold text-white truncate">{currentSession.teacher}</p>
-                           </div>
-                           <div className="p-4 bg-slate-950 rounded-lg border border-slate-800">
-                              <p className="text-[10px] text-slate-500 uppercase font-black mb-1">Room</p>
-                              <p className="text-sm font-bold text-white truncate">{currentSession.room}</p>
-                           </div>
-                        </div>
-                     </div>
-                     <div className="flex flex-col items-center gap-4 p-6 bg-slate-950 rounded-xl border border-slate-800 min-w-[200px] shadow-2xl">
-                        <div className="text-center">
-                           <p className="text-2xl font-black text-white">{currentSession.startTime}</p>
-                           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest my-1">To</p>
-                           <p className="text-xl font-black text-slate-400">{currentSession.endTime}</p>
-                        </div>
-                        <Link href="/dashboard/scan" className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white px-6 py-4 rounded-xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 transition-all shadow-lg shadow-blue-900/40">
-                           Initialize Scan
-                           <Scan size={16} />
-                        </Link>
-                     </div>
-                  </div>
-               ) : (
-                  <div className="flex flex-col items-center justify-center py-12 text-center">
-                     <div className="p-4 bg-slate-950 rounded-full border border-slate-800 mb-4 text-slate-700">
-                        <Calendar size={32} />
-                     </div>
-                     <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">No Active Class</h4>
-                     <p className="text-xs text-slate-600 mt-1 uppercase font-bold tracking-tighter">Scanning window is currently offline</p>
-                  </div>
-               )}
-            </div>
-          </div>
-        )}
-
-        {/* Right Column: Schedule & Quick Info */}
-        <div className={`${userData?.role === 'student' ? 'lg:col-span-4' : 'lg:col-span-12'} space-y-6`}>
-          {/* Schedule Card */}
-          <div className="bg-slate-900 p-6 rounded-lg border border-slate-800 shadow-xl flex flex-col h-full max-h-[700px]">
+        {/* Today's Protocol (Left) */}
+        <div className="lg:col-span-8 flex flex-col">
+          <div className="bg-slate-900 p-6 rounded-lg border border-slate-800 shadow-xl flex flex-col h-full min-h-[400px]">
             <div className="flex items-center justify-between mb-8">
                <div className="flex items-center gap-3">
                   <div className="p-2.5 bg-blue-600/10 rounded-lg border border-blue-500/20">
@@ -395,10 +234,19 @@ export default function DashboardPage() {
                   </div>
                   <h4 className="text-sm font-bold text-white uppercase tracking-[0.2em]">Today's Protocol</h4>
                </div>
-               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{todaySchedule.length} Slots</span>
+               <div className="flex items-center gap-4">
+                  <div className="flex flex-col items-end">
+                    <span className="text-xl font-bold text-white tabular-nums">
+                      {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+                    </span>
+                    <p className="text-[8px] font-medium text-emerald-400 uppercase tracking-widest">System Online</p>
+                  </div>
+                  <div className="h-8 w-px bg-slate-800 hidden sm:block"></div>
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{todaySchedule.length} Slots</span>
+               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto pr-2 space-y-4 no-scrollbar">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                {todaySchedule.length > 0 ? todaySchedule.map((session, idx) => (
                   <div 
                      key={session.id} 
@@ -428,20 +276,155 @@ export default function DashboardPage() {
                      </div>
                   </div>
                )) : (
-                  <div className="flex h-full flex-col items-center justify-center py-20 opacity-20">
-                     <Calendar size={48} className="mb-4" />
+                  <div className="col-span-full flex flex-col items-center justify-center py-20 text-slate-700 bg-slate-950/50 rounded-lg border border-dashed border-slate-800">
+                     <Calendar size={40} className="mb-4 opacity-20" />
                      <p className="text-xs font-black uppercase tracking-widest">No Deployments Scheduled</p>
+                     <p className="text-[10px] font-bold mt-1 opacity-50">Base logic is clear for today</p>
                   </div>
                )}
             </div>
+          </div>
+        </div>
 
-            <Link href="/dashboard/timetable" className="mt-8 flex items-center justify-center gap-3 py-4 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-800 transition-all text-[10px] font-black uppercase tracking-widest shadow-xl">
-               Full Registry Access
-               <ArrowRight size={14} />
-            </Link>
+        {/* Attendance Health Gauge (Right) */}
+        <div className="lg:col-span-4 flex flex-col">
+          <div className="bg-slate-900 p-8 rounded-lg border border-slate-800 shadow-xl flex flex-col items-center h-full justify-center min-h-[400px]">
+            <div className="w-full flex justify-between items-center mb-8">
+               <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Attendance Health</h4>
+               <TrendingUp size={16} className="text-emerald-400" />
+            </div>
+            <div className="relative w-full h-[240px]">
+               <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                     <Pie
+                        data={[
+                           { value: studentAnalytics?.percentage || 0 },
+                           { value: 100 - (studentAnalytics?.percentage || 0) }
+                        ]}
+                        cx="50%"
+                        cy="100%"
+                        startAngle={180}
+                        endAngle={0}
+                        innerRadius="110%"
+                        outerRadius="140%"
+                        paddingAngle={0}
+                        dataKey="value"
+                     >
+                        <Cell fill={studentAnalytics && studentAnalytics.percentage >= 75 ? "#3b82f6" : "#f43f5e"} />
+                        <Cell fill="#1e293b" />
+                     </Pie>
+                  </PieChart>
+               </ResponsiveContainer>
+               <div className="absolute inset-0 flex flex-col items-center justify-end pb-4">
+                  <span className="text-6xl font-black text-white">{studentAnalytics?.percentage || 0}%</span>
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-2">Total Average</span>
+               </div>
+            </div>
+            <div className="grid grid-cols-2 w-full gap-4 mt-12">
+               <div className="text-center p-4 bg-slate-950 rounded-xl border border-slate-800">
+                  <p className="text-2xl font-black text-white">{studentAnalytics?.totalPresent || 0}</p>
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Attended</p>
+               </div>
+               <div className="text-center p-4 bg-slate-950 rounded-xl border border-slate-800">
+                  <p className="text-2xl font-black text-white">{studentAnalytics?.totalSessions || 0}</p>
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Sessions</p>
+               </div>
+            </div>
           </div>
         </div>
       </div>
+      {/* Subject-wise Analytics (Bottom Row) - Only for Students */}
+      {userData?.role === 'student' && studentAnalytics && (
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="bg-slate-900 p-6 md:p-8 rounded-lg border border-slate-800 shadow-xl"
+        >
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-indigo-600/10 rounded-lg border border-indigo-500/20">
+                <TrendingUp className="text-indigo-500" size={20} />
+              </div>
+              <h4 className="text-sm font-bold text-white uppercase tracking-[0.2em]">Subject-wise Analytics</h4>
+            </div>
+            <div className="flex items-center gap-2">
+               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest hidden sm:block">Performance Matrix</span>
+            </div>
+          </div>
+
+          <div className="h-[300px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={studentAnalytics.subjectStats}>
+                <XAxis 
+                  dataKey="name" 
+                  stroke="#475569" 
+                  fontSize={10} 
+                  tickLine={false} 
+                  axisLine={false}
+                  tick={{ fill: '#94a3b8', fontWeight: 700 }}
+                  interval={0}
+                  tickFormatter={(value) => value.length > 10 ? `${value.substring(0, 10)}...` : value}
+                />
+                <YAxis 
+                  stroke="#475569" 
+                  fontSize={10} 
+                  tickLine={false} 
+                  axisLine={false}
+                  tick={{ fill: '#94a3b8', fontWeight: 700 }}
+                  domain={[0, 100]}
+                />
+                <RechartsTooltip 
+                  cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                  content={({ active, payload }) => {
+                    if (active && payload && payload.length) {
+                      const data = payload[0].payload;
+                      return (
+                        <div className="bg-slate-950 border border-slate-800 p-3 rounded-lg shadow-2xl backdrop-blur-md">
+                          <p className="text-[10px] font-black text-white uppercase tracking-widest mb-1">{data.name}</p>
+                          <p className="text-xl font-black text-blue-400">{data.percentage}%</p>
+                          <p className="text-[8px] font-bold text-slate-500 uppercase mt-1">
+                            {data.present} / {data.total} Sessions
+                          </p>
+                        </div>
+                      );
+                    }
+                    return null;
+                  }}
+                />
+                <Bar 
+                  dataKey="percentage" 
+                  radius={[4, 4, 0, 0]}
+                  barSize={40}
+                >
+                  {studentAnalytics.subjectStats.map((entry: any, index: number) => (
+                    <Cell 
+                      key={`cell-${index}`} 
+                      fill={entry.percentage >= 75 ? "#3b82f6" : "#f43f5e"} 
+                      fillOpacity={0.8}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Teacher/Default Stats View (Optional fallback or simplified view) */}
+      {userData?.role === 'teacher' && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {stats.map((stat, idx) => (
+            <div key={idx} className={`p-6 rounded-lg border ${stat.bg} ${stat.border} transition-all hover:scale-[1.02]`}>
+              <div className="flex items-center justify-between mb-4">
+                <stat.icon className={stat.color} size={20} />
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{stat.name}</span>
+              </div>
+              <p className="text-3xl font-black text-white">{stat.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </motion.div>
   );
 }
