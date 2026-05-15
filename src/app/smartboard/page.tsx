@@ -9,6 +9,7 @@ import { Monitor, ShieldCheck, Clock, Box, LayoutGrid, CheckCircle, AlertCircle,
 
 export default function SmartboardPage() {
   const router = useRouter();
+  const currentDayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][new Date().getDay()];
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "waiting" | "authenticated" | "marking-attendance">("idle");
   const [activeTeacher, setActiveTeacher] = useState<any>(null);
@@ -34,6 +35,7 @@ export default function SmartboardPage() {
   const [selectedTimeSlot, setSelectedTimeSlot] = useState("");
   const [selectedSection, setSelectedSection] = useState("");
   const [selectedGroup, setSelectedGroup] = useState("");
+  const [teacherSlots, setTeacherSlots] = useState<any[]>([]);
 
   const [students, setStudents] = useState<any[]>([]);
   const [mappings, setMappings] = useState<any[]>([]);
@@ -107,16 +109,17 @@ export default function SmartboardPage() {
         
         const q = query(
           collection(db, "timetables"),
-          where("teacher", "==", data.teacherName || "Professor"),
-          where("day", "==", currentDay)
+          where("teacher", "==", data.teacherName || "Professor")
         );
         const ttSnap = await getDocs(q);
-        const slots = ttSnap.docs.map(doc => doc.data());
+        const allSlots = ttSnap.docs.map(doc => doc.data());
+        setTeacherSlots(allSlots);
         
+        const todaySlots = allSlots.filter(s => s.day === currentDay);
         const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
         
         let activeSlot = null;
-        for (const slot of slots) {
+        for (const slot of todaySlots) {
           const [startH, startM] = slot.startTime.split(':').map(Number);
           const [endH, endM] = slot.endTime.split(':').map(Number);
           const startMin = startH * 60 + startM;
@@ -127,7 +130,7 @@ export default function SmartboardPage() {
           }
         }
         
-        if (!activeSlot && slots.length > 0) activeSlot = slots[0]; // fallback
+        if (!activeSlot && todaySlots.length > 0) activeSlot = todaySlots[0]; // fallback
         
         if (activeSlot) {
           setSelectedBranch(activeSlot.branch || "");
@@ -570,7 +573,10 @@ export default function SmartboardPage() {
                       <label className="text-xs font-semibold text-slate-400">Branch</label>
                       <select value={selectedBranch} onChange={e => { setSelectedBranch(e.target.value); setSelectedSection(""); setSelectedGroup(""); }} className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-all">
                          <option value="">Select Branch</option>
-                         {branches.map(b => <option key={b} value={b}>{b}</option>)}
+                         {teacherSlots.length > 0 
+                           ? Array.from(new Set(teacherSlots.map(s => s.branch))).sort().map(b => <option key={b} value={b}>{b}</option>)
+                           : branches.map(b => <option key={b} value={b}>{b}</option>)
+                         }
                       </select>
                    </div>
                    
@@ -578,7 +584,10 @@ export default function SmartboardPage() {
                       <label className="text-xs font-semibold text-slate-400">Semester</label>
                       <select value={selectedSemester} onChange={e => { setSelectedSemester(e.target.value); setSelectedSection(""); setSelectedGroup(""); }} className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-all">
                          <option value="">Select Semester</option>
-                         {semesters.map(s => <option key={s} value={s}>{s}</option>)}
+                         {teacherSlots.length > 0 
+                           ? Array.from(new Set(teacherSlots.filter(s => !selectedBranch || s.branch === selectedBranch).map(s => s.semester))).sort().map(s => <option key={s} value={s}>{s}</option>)
+                           : semesters.map(s => <option key={s} value={s}>{s}</option>)
+                         }
                       </select>
                    </div>
 
@@ -612,19 +621,49 @@ export default function SmartboardPage() {
                       <label className="text-xs font-semibold text-slate-400">Subject</label>
                       <select value={selectedSubject} onChange={e => setSelectedSubject(e.target.value)} className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500 transition-all">
                          <option value="">Select Subject</option>
-                         {subjects.filter(s => s.branch === selectedBranch).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
+                         {teacherSlots.length > 0
+                           ? Array.from(new Set(teacherSlots.filter(s => (!selectedBranch || s.branch === selectedBranch) && (!selectedSemester || s.semester === selectedSemester)).map(s => s.subject))).sort().map(sub => (
+                              <option key={sub} value={sub}>{sub}</option>
+                           ))
+                           : subjects.filter(s => s.branch === selectedBranch).map(s => <option key={s.name} value={s.name}>{s.name}</option>)
+                         }
                       </select>
                    </div>
 
                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-400">Room</label>
-                      <input type="text" value={selectedRoom} onChange={e => setSelectedRoom(e.target.value)} className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-500 transition-all uppercase" placeholder="e.g. LAB-01" />
-                   </div>
+                       <label className="text-xs font-semibold text-slate-400">Room</label>
+                       <select 
+                          value={selectedRoom} 
+                          onChange={e => setSelectedRoom(e.target.value)} 
+                          className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-500 transition-all uppercase"
+                       >
+                          <option value="">Select Room</option>
+                          {Array.from(new Set(teacherSlots.filter(s => s.day === currentDayName).map(s => s.room))).filter(Boolean).map(room => (
+                             <option key={room} value={room}>{room}</option>
+                          ))}
+                          {selectedRoom && !teacherSlots.some(s => s.room === selectedRoom) && (
+                             <option value={selectedRoom}>{selectedRoom}</option>
+                          )}
+                       </select>
+                    </div>
 
-                   <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-400">Time Slot</label>
-                      <input type="text" value={selectedTimeSlot} onChange={e => setSelectedTimeSlot(e.target.value)} className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-500 transition-all uppercase" placeholder="e.g. 10:00-11:00" />
-                   </div>
+                    <div className="space-y-1.5">
+                       <label className="text-xs font-semibold text-slate-400">Time Slot</label>
+                       <select 
+                          value={selectedTimeSlot} 
+                          onChange={e => setSelectedTimeSlot(e.target.value)} 
+                          className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-500 transition-all uppercase"
+                       >
+                          <option value="">Select Time Slot</option>
+                          {teacherSlots.filter(s => s.day === currentDayName).map((s, idx) => {
+                             const slotStr = `${s.startTime}-${s.endTime}`;
+                             return <option key={idx} value={slotStr}>{slotStr} ({s.subject})</option>
+                          })}
+                          {selectedTimeSlot && !teacherSlots.some(s => `${s.startTime}-${s.endTime}` === selectedTimeSlot) && (
+                             <option value={selectedTimeSlot}>{selectedTimeSlot}</option>
+                          )}
+                       </select>
+                    </div>
                 </div>
              </div>
 

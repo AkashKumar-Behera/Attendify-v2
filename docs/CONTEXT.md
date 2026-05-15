@@ -19,6 +19,16 @@ This file serves as a persistent memory and activity log for all AI agents (Gemi
 
 ---
 
+### [2026-05-15 17:56] | Agent: Antigravity | Task: Smartboard Subject & Academic Filtering Optimization | Status: Done
+- **Dynamic Filtering**: Restricted Branch, Semester, and Subject dropdowns to only show options allotted to the teacher in their timetable (across all days).
+- **Day-Specific Selectors**: Room and Time Slot dropdowns are now filtered specifically for the current day to reduce selection errors.
+- **Improved UX**: Added fallback logic to global lists if no timetable data is found, ensuring the UI remains functional for all teachers.
+
+### [2026-05-15 17:35] | Agent: Antigravity | Task: Smartboard Room & Time Slot Selectors | Status: Done
+- **Timetable Integration**: Replaced manual text inputs for Room and Time Slot with dynamic selectors.
+- **Auto-Population**: Selectors are now populated using the teacher's current day timetable fetched from Firestore.
+- **Smart Defaults**: Maintained the auto-detection logic that pre-selects the current active slot while allowing teachers to choose from other allotted slots.
+
 ### [2026-05-13 13:52] | Agent: Antigravity | Task: Documentation Overhaul & Technical Infographic | Status: Done
 - **Premium Infographic Flow**: Generated a high-fidelity technical infographic (`docs/infographic_flow.png`) summarizing the full system architecture (Security, Academic, Session, Cloud).
 - **Documentation Hub**: Created `docs/FLOWCHART.md` containing multiple versions of system diagrams (Technical, Presentation, Infographic).
