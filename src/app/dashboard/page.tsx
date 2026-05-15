@@ -15,7 +15,8 @@ import {
   Database,
   ChevronRight,
   RefreshCw,
-  Trophy
+  Trophy,
+  Scan
 } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect } from "react";
