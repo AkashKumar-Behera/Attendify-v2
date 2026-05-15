@@ -281,220 +281,219 @@ export default function DashboardPage() {
       transition={{ duration: 0.4, ease: "easeOut" }}
       className="max-w-7xl mx-auto space-y-5 pb-12"
     >
-      {/* ── Top Row ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
 
-        {/* Today's Timetable */}
-        <div className="lg:col-span-8">
-          <div className="bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-800 shadow-xl overflow-hidden h-full">
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-600/15 rounded-xl border border-blue-500/20">
-                  <Calendar className="text-blue-400" size={18} />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-white tracking-wide">Today's Classes</h4>
-                  <p className="text-[10px] text-slate-500 font-medium">{currentDay}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="text-right">
-                  <span className="text-lg font-bold text-white tabular-nums">
-                    {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
-                  </span>
-                  <p className="text-[9px] font-semibold text-emerald-400 uppercase tracking-widest">Live</p>
-                </div>
-                <div className="px-2.5 py-1 bg-slate-800 rounded-lg border border-slate-700">
-                  <span className="text-[10px] font-bold text-slate-400">{todaySchedule.length} slots</span>
-                </div>
-              </div>
-            </div>
+      {/* ── Row 1: Gauge (left) + Analytics (right) ── */}
+      {userData?.role === 'student' && (
+        <div className="overflow-x-auto pb-1 -mx-1 px-1">
+          <div className="flex gap-5 min-w-[640px]">
 
-            {/* Slots Grid */}
-            <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {todaySchedule.length > 0 ? todaySchedule.map((session) => {
-                const isActive = session === currentSession;
-                return (
-                  <div
-                    key={session.id}
-                    className={`relative p-4 rounded-xl border transition-all duration-200 ${
-                      isActive
-                        ? 'bg-blue-600/10 border-blue-500/40 shadow-lg shadow-blue-500/5'
-                        : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 hover:bg-slate-800/30'
-                    }`}
-                  >
-                    {isActive && (
-                      <span className="absolute top-3 right-3 flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 rounded-full text-[8px] font-bold text-blue-400 uppercase tracking-wider">
-                        <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
-                        Live
-                      </span>
-                    )}
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <Clock size={11} className={isActive ? 'text-blue-400' : 'text-slate-600'} />
-                      <span className={`text-[10px] font-bold tracking-wider ${isActive ? 'text-blue-400' : 'text-slate-500'}`}>
-                        {session.startTime} – {session.endTime}
-                      </span>
+            {/* Gauge Card */}
+            <div className="w-[300px] shrink-0">
+              <div className="bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-800 shadow-xl h-full flex flex-col">
+                <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-slate-800/60">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp size={14} className="text-emerald-400" />
+                    <h4 className="text-xs font-bold text-white uppercase tracking-[0.15em]">Attendance Health</h4>
+                  </div>
+                  {studentAnalytics && (
+                    <span
+                      className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border"
+                      style={{
+                        color: getAttendanceColor(studentAnalytics.percentage),
+                        borderColor: getAttendanceColor(studentAnalytics.percentage) + "40",
+                        backgroundColor: getAttendanceColor(studentAnalytics.percentage) + "15",
+                      }}
+                    >
+                      {studentAnalytics.percentage >= 75 ? "Good" : studentAnalytics.percentage >= 45 ? "Average" : "At Risk"}
+                    </span>
+                  )}
+                </div>
+                <div className="flex-1 flex flex-col items-center justify-center px-4 py-4">
+                  <GaugeChart percentage={studentAnalytics?.percentage || 0} />
+                  <div className="grid grid-cols-3 w-full gap-2 mt-3">
+                    <div className="text-center p-2.5 bg-slate-950/80 rounded-xl border border-slate-800">
+                      <p className="text-lg font-black text-white">{studentAnalytics?.totalPresent || 0}</p>
+                      <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Present</p>
                     </div>
-                    <h5 className="text-sm font-black text-white uppercase tracking-tight mb-3 leading-tight">
-                      {session.subject}
-                    </h5>
-                    <div className="flex items-center justify-between">
-                      <span className="flex items-center gap-1.5 text-[9px] text-slate-500 font-semibold uppercase">
-                        <DoorOpen size={10} className="text-slate-600" />
-                        Room {session.room}
-                      </span>
-                      <span className="text-[9px] text-slate-600 font-bold uppercase">
-                        {session.teacher?.split(' ')[0]}
-                      </span>
+                    <div className="text-center p-2.5 bg-slate-950/80 rounded-xl border border-slate-800">
+                      <p className="text-lg font-black text-white">
+                        {(studentAnalytics?.totalSessions || 0) - (studentAnalytics?.totalPresent || 0)}
+                      </p>
+                      <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Absent</p>
+                    </div>
+                    <div className="text-center p-2.5 bg-slate-950/80 rounded-xl border border-slate-800">
+                      <p className="text-lg font-black text-white">{studentAnalytics?.totalSessions || 0}</p>
+                      <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Total</p>
                     </div>
                   </div>
-                );
-              }) : (
-                <div className="col-span-full flex flex-col items-center justify-center py-16 text-slate-700">
-                  <Calendar size={36} className="mb-3 opacity-20" />
-                  <p className="text-xs font-black uppercase tracking-widest">No Classes Today</p>
-                  <p className="text-[10px] font-medium mt-1 opacity-40">Enjoy your free day</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Attendance Health */}
-        <div className="lg:col-span-4">
-          <div className="bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-800 shadow-xl h-full flex flex-col">
-            {/* Header */}
-            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-800/60">
-              <div className="flex items-center gap-2">
-                <TrendingUp size={15} className="text-emerald-400" />
-                <h4 className="text-xs font-bold text-white uppercase tracking-[0.15em]">Attendance Health</h4>
-              </div>
-              {studentAnalytics && (
-                <span
-                  className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border"
-                  style={{
-                    color: getAttendanceColor(studentAnalytics.percentage),
-                    borderColor: getAttendanceColor(studentAnalytics.percentage) + "40",
-                    backgroundColor: getAttendanceColor(studentAnalytics.percentage) + "15",
-                  }}
-                >
-                  {studentAnalytics.percentage >= 75 ? "Good" : studentAnalytics.percentage >= 45 ? "Average" : "At Risk"}
-                </span>
-              )}
-            </div>
-
-            {/* Gauge */}
-            <div className="flex-1 flex flex-col items-center justify-center px-4 py-4">
-              <GaugeChart percentage={studentAnalytics?.percentage || 0} />
-
-              {/* Stats row */}
-              <div className="grid grid-cols-3 w-full gap-2 mt-4">
-                <div className="text-center p-3 bg-slate-950/80 rounded-xl border border-slate-800">
-                  <p className="text-xl font-black text-white">{studentAnalytics?.totalPresent || 0}</p>
-                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Present</p>
-                </div>
-                <div className="text-center p-3 bg-slate-950/80 rounded-xl border border-slate-800">
-                  <p className="text-xl font-black text-white">
-                    {(studentAnalytics?.totalSessions || 0) - (studentAnalytics?.totalPresent || 0)}
-                  </p>
-                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Absent</p>
-                </div>
-                <div className="text-center p-3 bg-slate-950/80 rounded-xl border border-slate-800">
-                  <p className="text-xl font-black text-white">{studentAnalytics?.totalSessions || 0}</p>
-                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Total</p>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
 
-      {/* ── Subject-wise Analytics ── */}
-      {userData?.role === 'student' && studentAnalytics && (
-        <div className="bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-800 shadow-xl p-5">
-          <div className="flex items-center justify-between mb-5">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-indigo-600/15 rounded-xl border border-indigo-500/20">
-                <TrendingUp className="text-indigo-400" size={16} />
+            {/* Analytics Bar Chart */}
+            {studentAnalytics && (
+              <div className="flex-1 min-w-[320px]">
+                <div className="bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-800 shadow-xl h-full flex flex-col p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-1.5 bg-indigo-600/15 rounded-xl border border-indigo-500/20">
+                        <TrendingUp className="text-indigo-400" size={15} />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white tracking-wide">Subject Analytics</h4>
+                        <p className="text-[10px] text-slate-500 font-medium">{studentAnalytics.subjectStats.length} subjects</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2.5 text-[9px] font-bold uppercase tracking-widest text-slate-400">
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-500/80 inline-block" />≥75%</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-yellow-500/80 inline-block" />45–74%</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-rose-500/80 inline-block" />&lt;45%</span>
+                    </div>
+                  </div>
+
+                  <div className="flex-1 min-h-[200px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={studentAnalytics.subjectStats}
+                        barCategoryGap="35%"
+                        margin={{ top: 4, right: 8, left: -16, bottom: 0 }}
+                      >
+                        <XAxis
+                          dataKey="name"
+                          fontSize={10}
+                          tickLine={false}
+                          axisLine={{ stroke: 'transparent' }}
+                          tick={{ fill: '#64748b', fontWeight: 600 }}
+                          interval={0}
+                          tickFormatter={(v) => v.length > 9 ? `${v.substring(0, 9)}…` : v}
+                        />
+                        <YAxis
+                          fontSize={10}
+                          tickLine={false}
+                          axisLine={{ stroke: 'transparent' }}
+                          tick={{ fill: '#64748b', fontWeight: 600 }}
+                          domain={[0, 100]}
+                          ticks={[0, 25, 50, 75, 100]}
+                        />
+                        <RechartsTooltip
+                          cursor={{ fill: 'rgba(255,255,255,0.02)', radius: 6 }}
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const d = payload[0].payload;
+                              const color = getAttendanceColor(d.percentage);
+                              return (
+                                <div className="bg-slate-950 border border-slate-800 px-3 py-2.5 rounded-xl shadow-2xl">
+                                  <p className="text-[10px] font-black text-white uppercase tracking-wider mb-1">{d.name}</p>
+                                  <p className="text-2xl font-black leading-none" style={{ color }}>{d.percentage}%</p>
+                                  <p className="text-[9px] font-semibold text-slate-500 mt-1">
+                                    {d.total === 0 ? "No classes held yet" : `${d.present} present / ${d.total} total`}
+                                  </p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Bar dataKey="percentage" radius={[5, 5, 0, 0]} barSize={30} isAnimationActive={false}>
+                          {studentAnalytics.subjectStats.map((entry: any, index: number) => (
+                            <Cell
+                              key={`cell-${index}`}
+                              fill={entry.total === 0 ? "#334155" : getAttendanceColor(entry.percentage)}
+                              fillOpacity={entry.total === 0 ? 0.5 : 0.9}
+                            />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {studentAnalytics.subjectStats.some(s => s.total === 0) && (
+                    <p className="text-[9px] text-slate-600 font-medium mt-1 text-right">
+                      <span className="inline-block w-1.5 h-1.5 rounded bg-slate-700 mr-1 align-middle" />
+                      Grey = No classes held yet
+                    </p>
+                  )}
+                </div>
               </div>
-              <div>
-                <h4 className="text-sm font-bold text-white tracking-wide">Subject-wise Analytics</h4>
-                <p className="text-[10px] text-slate-500 font-medium">{studentAnalytics.subjectStats.length} subjects tracked</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3 text-[9px] font-bold uppercase tracking-widest text-slate-400">
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-emerald-500/80 inline-block" />≥75%</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-yellow-500/80 inline-block" />45–74%</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-rose-500/80 inline-block" />&lt;45%</span>
-            </div>
+            )}
           </div>
-
-          <div className="h-[240px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={studentAnalytics.subjectStats}
-                barCategoryGap="35%"
-                margin={{ top: 4, right: 8, left: -16, bottom: 0 }}
-              >
-                <XAxis
-                  dataKey="name"
-                  fontSize={10}
-                  tickLine={false}
-                  axisLine={{ stroke: 'transparent' }}
-                  tick={{ fill: '#64748b', fontWeight: 600 }}
-                  interval={0}
-                  tickFormatter={(v) => v.length > 9 ? `${v.substring(0, 9)}…` : v}
-                />
-                <YAxis
-                  fontSize={10}
-                  tickLine={false}
-                  axisLine={{ stroke: 'transparent' }}
-                  tick={{ fill: '#64748b', fontWeight: 600 }}
-                  domain={[0, 100]}
-                  ticks={[0, 25, 50, 75, 100]}
-                />
-                <RechartsTooltip
-                  cursor={{ fill: 'rgba(255,255,255,0.02)', radius: 6 }}
-                  content={({ active, payload }) => {
-                    if (active && payload && payload.length) {
-                      const d = payload[0].payload;
-                      const color = getAttendanceColor(d.percentage);
-                      return (
-                        <div className="bg-slate-950 border border-slate-800 px-3 py-2.5 rounded-xl shadow-2xl">
-                          <p className="text-[10px] font-black text-white uppercase tracking-wider mb-1.5">{d.name}</p>
-                          <p className="text-2xl font-black leading-none" style={{ color }}>{d.percentage}%</p>
-                          <p className="text-[9px] font-semibold text-slate-500 mt-1.5">
-                            {d.total === 0 ? "No classes held yet" : `${d.present} present / ${d.total} total`}
-                          </p>
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-                <Bar dataKey="percentage" radius={[5, 5, 0, 0]} barSize={32} isAnimationActive={false}>
-                  {studentAnalytics.subjectStats.map((entry: any, index: number) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={entry.total === 0 ? "#334155" : getAttendanceColor(entry.percentage)}
-                      fillOpacity={entry.total === 0 ? 0.5 : 0.9}
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* No-class legend */}
-          {studentAnalytics.subjectStats.some(s => s.total === 0) && (
-            <p className="text-[9px] text-slate-600 font-medium mt-2 text-right">
-              <span className="inline-block w-2 h-2 rounded bg-slate-700 mr-1 align-middle" />
-              Grey = No classes held yet
-            </p>
-          )}
         </div>
       )}
+
+      {/* ── Row 2: Today's Timetable ── */}
+      <div className="bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-600/15 rounded-xl border border-blue-500/20">
+              <Calendar className="text-blue-400" size={18} />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-white tracking-wide">Today's Classes</h4>
+              <p className="text-[10px] text-slate-500 font-medium">{currentDay}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <span className="text-lg font-bold text-white tabular-nums">
+                {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+              </span>
+              <p className="text-[9px] font-semibold text-emerald-400 uppercase tracking-widest">Live</p>
+            </div>
+            <div className="px-2.5 py-1 bg-slate-800 rounded-lg border border-slate-700">
+              <span className="text-[10px] font-bold text-slate-400">{todaySchedule.length} slots</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Slots Grid */}
+        <div className="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {todaySchedule.length > 0 ? todaySchedule.map((session) => {
+            const isActive = session === currentSession;
+            return (
+              <div
+                key={session.id}
+                className={`relative p-4 rounded-xl border transition-all duration-200 ${
+                  isActive
+                    ? 'bg-blue-600/10 border-blue-500/40 shadow-lg shadow-blue-500/5'
+                    : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 hover:bg-slate-800/30'
+                }`}
+              >
+                {isActive && (
+                  <span className="absolute top-3 right-3 flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 rounded-full text-[8px] font-bold text-blue-400 uppercase tracking-wider">
+                    <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
+                    Live
+                  </span>
+                )}
+                <div className="flex items-center gap-1.5 mb-2">
+                  <Clock size={11} className={isActive ? 'text-blue-400' : 'text-slate-600'} />
+                  <span className={`text-[10px] font-bold tracking-wider ${isActive ? 'text-blue-400' : 'text-slate-500'}`}>
+                    {session.startTime} – {session.endTime}
+                  </span>
+                </div>
+                <h5 className="text-sm font-black text-white uppercase tracking-tight mb-3 leading-tight">
+                  {session.subject}
+                </h5>
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-[9px] text-slate-500 font-semibold uppercase">
+                    <DoorOpen size={10} className="text-slate-600" />
+                    Room {session.room}
+                  </span>
+                  <span className="text-[9px] text-slate-600 font-bold uppercase">
+                    {session.teacher?.split(' ')[0]}
+                  </span>
+                </div>
+              </div>
+            );
+          }) : (
+            <div className="col-span-full flex flex-col items-center justify-center py-16 text-slate-700">
+              <Calendar size={36} className="mb-3 opacity-20" />
+              <p className="text-xs font-black uppercase tracking-widest">No Classes Today</p>
+              <p className="text-[10px] font-medium mt-1 opacity-40">Enjoy your free day</p>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Teacher Stats */}
       {userData?.role === 'teacher' && (
