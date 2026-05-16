@@ -55,7 +55,7 @@ export default function DashboardLayout({
     { name: "Overview", icon: LayoutDashboard, href: "/dashboard", roles: ["admin", "teacher", "student"] },
     { name: "Users", icon: UserPlus, href: "/dashboard/users", roles: ["admin", "teacher"] },
     { name: "Timetable", icon: Calendar, href: "/dashboard/timetable", roles: ["admin", "teacher", "student"] },
-    { name: "Attendance", icon: QrCode, href: "/dashboard/scan", roles: ["teacher", "student"] },
+    { name: userData?.role === 'teacher' ? "Passkey" : "Attendance", icon: QrCode, href: "/dashboard/scan", roles: ["teacher", "student"] },
     { name: "Records", icon: History, href: "/dashboard/history", roles: ["admin", "teacher"] },
     { name: "Settings", icon: Settings, href: "/dashboard/settings", roles: ["admin", "teacher", "student"] },
   ];
