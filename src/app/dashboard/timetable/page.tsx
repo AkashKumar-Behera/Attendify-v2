@@ -46,7 +46,7 @@ export default function TimetablePage() {
   const [allSubjects, setAllSubjects] = useState<any[]>([]);
   const [allTeachers, setAllTeachers] = useState<any[]>([]);
   const [batchMappings, setBatchMappings] = useState<any[]>([]);
-  const [selectedDay, setSelectedDay] = useState("Monday");
+  const [selectedDay, setSelectedDay] = useState(days[new Date().getDay() - 1] || "Monday");
   const [selectedBranch, setSelectedBranch] = useState("");
   const [selectedSem, setSelectedSem] = useState("");
   const [isPersonalMode, setIsPersonalMode] = useState(false);
