@@ -20,7 +20,7 @@ import {
   BarChart2
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
-import { collection, query, where, getDocs, getCountFromServer } from "firebase/firestore";
+import { collection, query, where, getDocs, getCountFromServer, collectionGroup } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { motion } from "framer-motion";
 import { 
@@ -224,10 +224,17 @@ export default function DashboardPage() {
     }
   };
 
+  const [velocityData, setVelocityData] = useState<any[]>([
+    { name: 'Mon', val: 0 }, { name: 'Tue', val: 0 }, { name: 'Wed', val: 0 },
+    { name: 'Thu', val: 0 }, { name: 'Fri', val: 0 }, { name: 'Sat', val: 0 }, { name: 'Sun', val: 0 }
+  ]);
+
   const fetchAdminAnalytics = async () => {
     try {
-      const snap = await getDocs(query(collection(db, "smartboardSessions"), where("status", "==", "completed")));
+      // Use collectionGroup to fetch ALL attendance dates across all subjects
+      const snap = await getDocs(query(collectionGroup(db, "dates")));
       const now = new Date();
+      now.setHours(0, 0, 0, 0); // Normalize 'now' to start of today for accurate diff
       
       const aggregate = {
         daily: { present: 0, absent: 0, total: 0 },
@@ -236,42 +243,72 @@ export default function DashboardPage() {
         all: { present: 0, absent: 0, total: 0 }
       };
 
+      const last7Days = Array.from({ length: 7 }, (_, i) => { 
+        const d = new Date(now); 
+        d.setDate(now.getDate() - (6 - i)); 
+        return d; 
+      });
+      
+      const dailyVelocity = last7Days.map(d => ({ 
+        name: days[d.getDay()].substring(0,3), 
+        present: 0, 
+        total: 0, 
+        time: d.getTime() 
+      }));
+
       snap.docs.forEach(doc => {
         const data = doc.data();
-        let dateObj = null;
-        if (data.finalizedAt?.toDate) {
-            dateObj = data.finalizedAt.toDate();
-        } else if (data.createdAt?.toDate) {
-            dateObj = data.createdAt.toDate();
-        } else if (data.finalizedAt) {
-            dateObj = new Date(data.finalizedAt);
-        } else if (data.createdAt) {
-            dateObj = new Date(data.createdAt);
-        }
-        
-        if (!dateObj) return;
+        if (!data.date || !data.attendance) return;
 
-        const present = (data.presentCount || 0) + (data.proxyCount || 0); // Include proxies as present for aggregate
-        const absent = data.absentCount || 0;
-        const total = present + absent;
+        // Parse "DD-MM-YYYY" string
+        const parts = data.date.split('-');
+        if (parts.length !== 3) return;
+        const [day, month, year] = parts.map(Number);
+        const dateObj = new Date(year, month - 1, day);
+        if (isNaN(dateObj.getTime())) return;
         
-        const diffTime = Math.abs(now.getTime() - dateObj.getTime());
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-        const isToday = dateObj.toDateString() === now.toDateString();
+        let presentCount = 0;
+        let absentCount = 0;
+        Object.values(data.attendance).forEach(status => {
+          if (status === 'present') presentCount++;
+          else if (status === 'absent') absentCount++;
+        });
+
+        const totalCount = presentCount + absentCount;
+        if (totalCount === 0) return;
+
+        // Calculate days difference by normalizing both dates to midnight
+        const diffTime = now.getTime() - dateObj.getTime();
+        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)); 
+        const isToday = diffDays === 0;
 
         const addStats = (target: any) => {
-          target.present += present;
-          target.absent += absent;
-          target.total += total;
+          target.present += presentCount;
+          target.absent += absentCount;
+          target.total += totalCount;
         };
 
-        addStats(aggregate.all);
-        if (diffDays <= 30) addStats(aggregate.monthly);
-        if (diffDays <= 7) addStats(aggregate.weekly);
-        if (isToday) addStats(aggregate.daily);
+        if (diffDays >= 0) {
+           addStats(aggregate.all);
+           if (diffDays <= 30) addStats(aggregate.monthly);
+           if (diffDays <= 7) addStats(aggregate.weekly);
+           if (isToday) addStats(aggregate.daily);
+           
+           if (diffDays < 7) {
+             const targetDay = dailyVelocity.find(dv => dv.time === dateObj.getTime());
+             if (targetDay) {
+                 targetDay.present += presentCount;
+                 targetDay.total += totalCount;
+             }
+           }
+        }
       });
 
       setAdminAggregate(aggregate);
+      setVelocityData(dailyVelocity.map(dv => ({
+          name: dv.name,
+          val: dv.total > 0 ? Math.round((dv.present / dv.total) * 100) : 0
+      })));
     } catch (err) {
       console.error("Admin Analytics Fetch Error:", err);
     }
@@ -437,8 +474,9 @@ export default function DashboardPage() {
                             dataKey="name" 
                             axisLine={false} 
                             tickLine={false} 
-                            tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }} 
-                            height={24}
+                            tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700, angle: -90, textAnchor: 'end', dy: -5, dx: -5 }} 
+                            height={70}
+                            interval={0}
                           />
                         ) : (
                           <XAxis hide />
@@ -674,14 +712,18 @@ export default function DashboardPage() {
               const avgStr = currentAgg.total > 0 ? Math.round((currentAgg.present / currentAgg.total) * 100) + '%' : '0%';
 
               const adminStatsList = [
-                { name: "Total Present", value: presentStr, icon: Users, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
-                { name: "Total Absent", value: absentStr, icon: AlertCircle, color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/20" },
+                { name: "Total Present", value: presentStr, icon: Users, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", path: "/dashboard/history" },
+                { name: "Total Absent", value: absentStr, icon: AlertCircle, color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/20", path: "/dashboard/history" },
                 { name: "Avg Attendance", value: avgStr, icon: TrendingUp, color: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/20" },
-                { name: "Total Students", value: baseUsers, icon: ShieldCheck, color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" },
+                { name: "Total Students", value: baseUsers, icon: ShieldCheck, color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20", path: "/dashboard/users" },
               ];
               
               return adminStatsList.map((stat, idx) => (
-                <div key={idx} className={`p-5 rounded-2xl border ${stat.bg} ${stat.border} transition-all hover:scale-[1.02]`}>
+                <div 
+                  key={idx} 
+                  onClick={() => stat.path ? router.push(stat.path) : undefined}
+                  className={`p-5 rounded-2xl border ${stat.bg} ${stat.border} transition-all hover:scale-[1.02] ${stat.path ? 'cursor-pointer hover:bg-opacity-80' : ''}`}
+                >
                   <div className="flex items-center justify-between mb-3">
                     <stat.icon className={stat.color} size={18} />
                     <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{stat.name}</span>
@@ -709,10 +751,7 @@ export default function DashboardPage() {
               </div>
               <div className="flex-1 min-h-[240px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={[
-                    { name: 'Mon', val: 65 }, { name: 'Tue', val: 72 }, { name: 'Wed', val: 68 },
-                    { name: 'Thu', val: 85 }, { name: 'Fri', val: 78 }, { name: 'Sat', val: 90 }, { name: 'Sun', val: 88 }
-                  ]} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+                  <AreaChart data={velocityData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
                     <defs>
                       <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3}/>
@@ -725,6 +764,7 @@ export default function DashboardPage() {
                       contentStyle={{ backgroundColor: '#020617', borderColor: '#1e293b', borderRadius: '12px' }} 
                       itemStyle={{ color: '#818cf8', fontWeight: 900 }} 
                       cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 1, strokeDasharray: '4 4' }}
+                      formatter={(value: any) => [`${value}%`, 'Average']}
                     />
                     <Area type="monotone" dataKey="val" stroke="#818cf8" strokeWidth={3} fillOpacity={1} fill="url(#colorVal)" />
                   </AreaChart>
