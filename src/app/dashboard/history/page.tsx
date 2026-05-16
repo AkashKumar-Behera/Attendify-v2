@@ -110,25 +110,35 @@ export default function HistoryPage() {
       // 3. Get Attendance Dates
       const cleanBranch = selectedBranch.replace(/\s+/g, '_');
       const cleanSem = selectedSem.replace(/\s+/g, '_');
-      const cleanSub = selectedSubject.replace(/\s+/g, '_');
       
-      const datesRef = collection(db, "SubjectAttendance", `${cleanBranch}_${cleanSem}_${cleanSub}`, "dates");
-      const datesSnap = await getDocs(datesRef);
+      let subjectsToFetch = [];
+      if (selectedSubject === 'all') {
+         subjectsToFetch = subjects;
+      } else {
+         subjectsToFetch = [selectedSubject];
+      }
       
       // Filter dates to last 30 days
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       
       const validDates: any[] = [];
-      datesSnap.forEach(doc => {
-        const data = doc.data();
-        // Parse "13-5-2026"
-        const [day, month, year] = data.date.split('-');
-        const dateObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-        if (dateObj >= thirtyDaysAgo) {
-          validDates.push(data);
-        }
-      });
+      
+      for (const sub of subjectsToFetch) {
+        const cleanSub = sub.replace(/\s+/g, '_');
+        const datesRef = collection(db, "SubjectAttendance", `${cleanBranch}_${cleanSem}_${cleanSub}`, "dates");
+        const datesSnap = await getDocs(datesRef);
+        
+        datesSnap.forEach(doc => {
+          const data = doc.data();
+          // Parse "13-5-2026"
+          const [day, month, year] = data.date.split('-');
+          const dateObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+          if (dateObj >= thirtyDaysAgo) {
+            validDates.push({ ...data, subject: sub });
+          }
+        });
+      }
 
       setTotalClasses(validDates.length);
       setValidDates(validDates);
@@ -144,7 +154,8 @@ export default function HistoryPage() {
           if (status === 'present') presentCount++;
           else absentCount++; // Treat unrecorded as absent if date exists
           
-          const key = dateRecord.timeslot ? `${dateRecord.date} (${dateRecord.timeslot})` : dateRecord.date;
+          const baseKey = dateRecord.timeslot ? `${dateRecord.date} (${dateRecord.timeslot})` : dateRecord.date;
+          const key = selectedSubject === 'all' ? `[${dateRecord.subject}] ${baseKey}` : baseKey;
           history[key] = status === 'present' ? 'P' : 'A';
         });
 
@@ -177,7 +188,10 @@ export default function HistoryPage() {
   const exportToCSV = () => {
     if (attendanceRecords.length === 0) return;
     
-    const dateHeaders = validDates.map(d => d.timeslot ? `${d.date} (${d.timeslot})` : d.date);
+    const dateHeaders = validDates.map(d => {
+       const baseDate = d.timeslot ? `${d.date} (${d.timeslot})` : d.date;
+       return selectedSubject === 'all' ? `[${d.subject}] ${baseDate}` : baseDate;
+    });
     const headers = ["Sl No", "Student Regd No", "Name", "Subject", "Present", "Absent", "Avg %", ...dateHeaders, "Student Email"];
     
     const rows = attendanceRecords.map((rec, idx) => {
@@ -286,6 +300,7 @@ export default function HistoryPage() {
             className="w-full bg-slate-950/80 border border-white/10 rounded-lg px-3 py-2 text-sm font-medium text-white focus:outline-none focus:border-emerald-500/50 transition-all disabled:opacity-50"
           >
             <option value="">Select Subject</option>
+            <option value="all">All Subjects</option>
             {subjects.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>

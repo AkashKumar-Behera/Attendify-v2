@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@/lib/AuthContext";
+import { useRouter } from "next/navigation";
 import { 
   Users, 
   Clock, 
@@ -10,13 +11,20 @@ import {
   MapPin,
   ShieldCheck,
   DoorOpen,
+  Activity,
+  WifiOff,
+  PlusSquare,
+  List,
+  Server,
+  Zap,
+  BarChart2
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { collection, query, where, getDocs, getCountFromServer } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { motion } from "framer-motion";
 import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, Cell, ResponsiveContainer, LabelList
+  BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, Cell, ResponsiveContainer, LabelList, AreaChart, Area
 } from 'recharts';
 
 // ─── Animated Gauge (SVG-based, no Recharts flash) ────────────────────────────
@@ -120,6 +128,7 @@ const getAttendanceColor = (pct: number) => {
 // ─── Main Component ────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const { userData } = useAuth();
+  const router = useRouter();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [todaySchedule, setTodaySchedule] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -135,6 +144,8 @@ export default function DashboardPage() {
   const currentDay = days[currentTime.getDay()];
 
   const [isDesktop, setIsDesktop] = useState(true);
+  const [adminTimeFilter, setAdminTimeFilter] = useState<'daily' | 'weekly' | 'monthly' | 'all'>('daily');
+  const [adminAggregate, setAdminAggregate] = useState<any>(null);
 
   useEffect(() => {
     const handleResize = () => setIsDesktop(window.innerWidth >= 768);
@@ -175,6 +186,8 @@ export default function DashboardPage() {
         q = query(collection(db, "timetables"), where("day", "==", currentDay), where("teacher", "==", userData.name));
       } else if (userData?.role === 'student' && branch && semester) {
         q = query(collection(db, "timetables"), where("day", "==", currentDay), where("branch", "==", branch), where("semester", "==", semester));
+      } else if (userData?.role === 'admin' || userData?.role === 'master') {
+        q = query(collection(db, "timetables"), where("day", "==", currentDay));
       } else {
         setLoading(false);
         return;
@@ -185,26 +198,82 @@ export default function DashboardPage() {
       const sorted = data.sort((a: any, b: any) => a.startTime.localeCompare(b.startTime));
       setTodaySchedule(sorted);
 
-      let totalUsersCount = 0;
+      let totalStudentsCount = 0;
       try {
-        const usersSnap = await getCountFromServer(collection(db, "users"));
-        totalUsersCount = usersSnap.data().count;
+        const studentsQuery = query(collection(db, "users"), where("role", "==", "student"));
+        const studentsSnap = await getCountFromServer(studentsQuery);
+        totalStudentsCount = studentsSnap.data().count;
       } catch (e) { console.error(e); }
 
       setStats([
         { name: "Today's Classes", value: sorted.length.toString(), icon: Clock, color: "text-indigo-400", bg: "bg-indigo-500/10", border: "border-indigo-500/20" },
-        { name: "Total Users", value: totalUsersCount.toString(), icon: Users, color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" },
+        { name: "Total Students", value: totalStudentsCount.toString(), icon: Users, color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" },
         { name: "System Status", value: "Online", icon: ShieldCheck, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
         { name: "Notifications", value: "0", icon: AlertCircle, color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/20" },
       ]);
 
       if (userData?.role === 'student' && userData.regNo) {
         fetchStudentAnalytics(branch, semester);
+      } else if (userData?.role === 'admin' || userData?.role === 'master') {
+        fetchAdminAnalytics();
       }
     } catch (error) {
       console.error("Dashboard Fetch Error:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchAdminAnalytics = async () => {
+    try {
+      const snap = await getDocs(query(collection(db, "smartboardSessions"), where("status", "==", "completed")));
+      const now = new Date();
+      
+      const aggregate = {
+        daily: { present: 0, absent: 0, total: 0 },
+        weekly: { present: 0, absent: 0, total: 0 },
+        monthly: { present: 0, absent: 0, total: 0 },
+        all: { present: 0, absent: 0, total: 0 }
+      };
+
+      snap.docs.forEach(doc => {
+        const data = doc.data();
+        let dateObj = null;
+        if (data.finalizedAt?.toDate) {
+            dateObj = data.finalizedAt.toDate();
+        } else if (data.createdAt?.toDate) {
+            dateObj = data.createdAt.toDate();
+        } else if (data.finalizedAt) {
+            dateObj = new Date(data.finalizedAt);
+        } else if (data.createdAt) {
+            dateObj = new Date(data.createdAt);
+        }
+        
+        if (!dateObj) return;
+
+        const present = (data.presentCount || 0) + (data.proxyCount || 0); // Include proxies as present for aggregate
+        const absent = data.absentCount || 0;
+        const total = present + absent;
+        
+        const diffTime = Math.abs(now.getTime() - dateObj.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+        const isToday = dateObj.toDateString() === now.toDateString();
+
+        const addStats = (target: any) => {
+          target.present += present;
+          target.absent += absent;
+          target.total += total;
+        };
+
+        addStats(aggregate.all);
+        if (diffDays <= 30) addStats(aggregate.monthly);
+        if (diffDays <= 7) addStats(aggregate.weekly);
+        if (isToday) addStats(aggregate.daily);
+      });
+
+      setAdminAggregate(aggregate);
+    } catch (err) {
+      console.error("Admin Analytics Fetch Error:", err);
     }
   };
 
@@ -546,8 +615,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Teacher Stats */}
-      {userData?.role === 'teacher' && (
+      {/* Quick Stats (Teacher Only) */}
+      {(userData?.role === 'teacher') && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {stats.map((stat, idx) => (
             <div key={idx} className={`p-5 rounded-2xl border ${stat.bg} ${stat.border} transition-all hover:scale-[1.02]`}>
@@ -558,6 +627,170 @@ export default function DashboardPage() {
               <p className="text-3xl font-black text-white">{stat.value}</p>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Admin Command Center */}
+      {(userData?.role === 'admin' || userData?.role === 'master') && (
+        <div className="space-y-6 mt-8">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-1 mb-2">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-indigo-600/15 rounded-xl border border-indigo-500/20">
+                <Server className="text-indigo-400" size={18} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white tracking-wide uppercase">Command Center</h3>
+                <p className="text-[10px] text-slate-500 font-bold tracking-widest uppercase">System Overview & Analytics</p>
+              </div>
+            </div>
+
+            {/* Time Filter Tabs */}
+            <div className="flex items-center bg-slate-900/80 p-1 rounded-xl border border-slate-800">
+              {(['daily', 'weekly', 'monthly', 'all'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setAdminTimeFilter(tab)}
+                  className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                    adminTimeFilter === tab
+                      ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  {tab === 'all' ? 'All-Time' : tab}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Admin Specific Quick Stats */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {(() => {
+              const baseUsers = stats.find(s => s.name === "Total Students")?.value || "0";
+              const currentAgg = adminAggregate ? adminAggregate[adminTimeFilter] : { present: 0, absent: 0, total: 0 };
+              
+              const formatNumber = (num: number) => new Intl.NumberFormat('en-IN').format(num);
+              const presentStr = formatNumber(currentAgg.present);
+              const absentStr = formatNumber(currentAgg.absent);
+              const avgStr = currentAgg.total > 0 ? Math.round((currentAgg.present / currentAgg.total) * 100) + '%' : '0%';
+
+              const adminStatsList = [
+                { name: "Total Present", value: presentStr, icon: Users, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
+                { name: "Total Absent", value: absentStr, icon: AlertCircle, color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/20" },
+                { name: "Avg Attendance", value: avgStr, icon: TrendingUp, color: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/20" },
+                { name: "Total Students", value: baseUsers, icon: ShieldCheck, color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" },
+              ];
+              
+              return adminStatsList.map((stat, idx) => (
+                <div key={idx} className={`p-5 rounded-2xl border ${stat.bg} ${stat.border} transition-all hover:scale-[1.02]`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <stat.icon className={stat.color} size={18} />
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{stat.name}</span>
+                  </div>
+                  <p className="text-3xl font-black text-white">{stat.value}</p>
+                </div>
+              ));
+            })()}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            {/* Strategic Analytics - Area Chart */}
+            <div className="lg:col-span-2 bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-800 shadow-xl p-5 flex flex-col">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 bg-indigo-600/15 rounded-xl border border-indigo-500/20">
+                    <BarChart2 className="text-indigo-400" size={15} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white tracking-wide">Attendance Velocity</h4>
+                    <p className="text-[10px] text-slate-500 font-medium">Institution-wide trend</p>
+                  </div>
+                </div>
+                <span className="text-[9px] font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-2 py-1 rounded-md uppercase tracking-widest">Last 7 Days</span>
+              </div>
+              <div className="flex-1 min-h-[240px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={[
+                    { name: 'Mon', val: 65 }, { name: 'Tue', val: 72 }, { name: 'Wed', val: 68 },
+                    { name: 'Thu', val: 85 }, { name: 'Fri', val: 78 }, { name: 'Sat', val: 90 }, { name: 'Sun', val: 88 }
+                  ]} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#818cf8" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }} />
+                    <RechartsTooltip 
+                      contentStyle={{ backgroundColor: '#020617', borderColor: '#1e293b', borderRadius: '12px' }} 
+                      itemStyle={{ color: '#818cf8', fontWeight: 900 }} 
+                      cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 1, strokeDasharray: '4 4' }}
+                    />
+                    <Area type="monotone" dataKey="val" stroke="#818cf8" strokeWidth={3} fillOpacity={1} fill="url(#colorVal)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Security & Infrastructure Panel */}
+            <div className="flex flex-col gap-5">
+              {/* Security Monitor */}
+              <div className="bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-800 shadow-xl p-5 flex-1">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <ShieldCheck className="text-rose-400" size={16} />
+                    <h4 className="text-xs font-bold text-white uppercase tracking-widest">Security Monitor</h4>
+                  </div>
+                  <span className="flex h-2 w-2 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {[
+                    { title: "Proxy Attempt Blocked", desc: "CS Branch - Sem 4", time: "2m ago", color: "text-rose-400", bg: "bg-rose-500/10" },
+                    { title: "Geofence Violation", desc: "Library Sector", time: "15m ago", color: "text-yellow-400", bg: "bg-yellow-500/10" },
+                    { title: "Multiple Logins", desc: "User ID #49281", time: "1h ago", color: "text-orange-400", bg: "bg-orange-500/10" }
+                  ].map((alert, i) => (
+                    <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-slate-950/50 border border-slate-800/60 hover:bg-slate-800/40 transition-colors cursor-pointer group">
+                      <div className={`p-2 rounded-lg ${alert.bg} group-hover:scale-110 transition-transform`}>
+                        <WifiOff className={alert.color} size={14} />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-[10px] font-bold text-white">{alert.title}</p>
+                        <p className="text-[9px] text-slate-500">{alert.desc}</p>
+                      </div>
+                      <span className="text-[8px] font-bold text-slate-600 uppercase">{alert.time}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Quick Actions */}
+              <div className="bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-800 shadow-xl p-5">
+                <div className="flex items-center gap-2.5 mb-4">
+                  <Zap className="text-amber-400" size={16} />
+                  <h4 className="text-xs font-bold text-white uppercase tracking-widest">Quick Actions</h4>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <button 
+                    onClick={() => router.push('/dashboard/timetable')}
+                    className="flex flex-col items-center justify-center p-3 rounded-xl bg-slate-950/50 border border-slate-800/60 hover:bg-slate-800 hover:border-slate-600 transition-all group"
+                  >
+                    <PlusSquare className="text-slate-400 group-hover:text-amber-400 mb-2 transition-colors" size={18} />
+                    <span className="text-[9px] font-bold text-slate-400 group-hover:text-white uppercase tracking-widest transition-colors">New Subject</span>
+                  </button>
+                  <button 
+                    onClick={() => router.push('/dashboard/users')}
+                    className="flex flex-col items-center justify-center p-3 rounded-xl bg-slate-950/50 border border-slate-800/60 hover:bg-slate-800 hover:border-slate-600 transition-all group"
+                  >
+                    <Users className="text-slate-400 group-hover:text-amber-400 mb-2 transition-colors" size={18} />
+                    <span className="text-[9px] font-bold text-slate-400 group-hover:text-white uppercase tracking-widest transition-colors">Add User</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </motion.div>

@@ -23,8 +23,12 @@ import {
   ArrowLeft,
   ChevronLeft,
   Hash,
-  RefreshCw
+  RefreshCw,
+  TrendingUp
 } from "lucide-react";
+import { 
+  BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell 
+} from 'recharts';
 import { useAuth } from "@/lib/AuthContext";
 import { db } from "@/lib/firebase";
 import { 
@@ -35,9 +39,94 @@ import {
   deleteDoc, 
   doc, 
   getDocs,
-  updateDoc
+  updateDoc,
+  where
 } from "firebase/firestore";
 import { motion, AnimatePresence } from "framer-motion";
+import { useRef } from "react";
+
+// ─── Animated Gauge (SVG-based, no Recharts flash) ────────────────────────────
+function GaugeChart({ percentage }: { percentage: number }) {
+  const [displayed, setDisplayed] = useState(0);
+  const animRef = useRef<number | null>(null);
+  const startRef = useRef<number | null>(null);
+
+  const color =
+    percentage >= 75 ? "#22c55e" :
+    percentage >= 45 ? "#eab308" :
+    "#f43f5e";
+
+  useEffect(() => {
+    const duration = 1200;
+    startRef.current = null;
+    const animate = (ts: number) => {
+      if (!startRef.current) startRef.current = ts;
+      const elapsed = ts - startRef.current;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplayed(Math.round(eased * percentage));
+      if (progress < 1) animRef.current = requestAnimationFrame(animate);
+    };
+    animRef.current = requestAnimationFrame(animate);
+    return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
+  }, [percentage]);
+
+  const r = 70;
+  const cx = 100;
+  const cy = 95;
+  const strokeW = 12;
+  const circumference = Math.PI * r;
+  const filled = (percentage / 100) * circumference;
+
+  const describeArc = (startDeg: number, endDeg: number) => {
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const x1 = cx + r * Math.cos(toRad(startDeg));
+    const y1 = cy + r * Math.sin(toRad(startDeg));
+    const x2 = cx + r * Math.cos(toRad(endDeg));
+    const y2 = cy + r * Math.sin(toRad(endDeg));
+    return `M ${x1} ${y1} A ${r} ${r} 0 0 1 ${x2} ${y2}`;
+  };
+
+  return (
+    <div className="flex flex-col items-center w-full">
+      <svg viewBox="0 0 200 105" className="w-full max-w-[220px]" overflow="visible">
+        <path d={describeArc(180, 0)} fill="none" stroke="#1e293b" strokeWidth={strokeW} strokeLinecap="round" />
+        <defs>
+          <filter id="glow">
+            <feGaussianBlur stdDeviation="3" result="coloredBlur" />
+            <feMerge>
+              <feMergeNode in="coloredBlur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+        <path
+          d={describeArc(180, 0)}
+          fill="none"
+          stroke={color}
+          strokeWidth={strokeW}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference - filled}
+          filter="url(#glow)"
+          style={{ transition: "stroke-dashoffset 1.2s cubic-bezier(0.34, 1.56, 0.64, 1), stroke 0.4s ease" }}
+        />
+        <text x={cx} y={cy - 4} textAnchor="middle" fontSize="26" fontWeight="900" fill={color} fontFamily="inherit">
+          {displayed}%
+        </text>
+        <text x={cx} y={cy + 14} textAnchor="middle" fontSize="7.5" fontWeight="700" fill="#64748b" fontFamily="inherit" letterSpacing="2">
+          TOTAL AVERAGE
+        </text>
+      </svg>
+    </div>
+  );
+}
+
+const getAttendanceColor = (pct: number) => {
+  if (pct >= 75) return "#22c55e";
+  if (pct >= 45) return "#eab308";
+  return "#f43f5e";
+};
 
 export default function ManageUsersPage() {
   const { userData } = useAuth();
@@ -76,6 +165,98 @@ export default function ManageUsersPage() {
 
   const [hasSearched, setHasSearched] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+
+  const [studentAnalytics, setStudentAnalytics] = useState<{
+    percentage: number;
+    totalPresent: number;
+    totalSessions: number;
+    subjectStats: any[];
+  } | null>(null);
+
+  const [isDesktop, setIsDesktop] = useState(true);
+
+  useEffect(() => {
+    const handleResize = () => setIsDesktop(window.innerWidth >= 768);
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const fetchStudentAnalytics = async (user: any) => {
+    if (!user || user.role !== 'student') {
+      setStudentAnalytics(null);
+      return;
+    }
+
+    try {
+      const meta = resolveStudentMeta(user);
+      const targetBranch = meta.branch;
+      const targetSem = meta.semester;
+      if (!targetBranch || !targetSem || !user.regNo) return;
+
+      const timetableSnap = await getDocs(query(
+        collection(db, "timetables"),
+        where("branch", "==", targetBranch),
+        where("semester", "==", targetSem)
+      ));
+      const officialSubjects = Array.from(
+        new Set(timetableSnap.docs.map(doc => doc.data().subject).filter(Boolean))
+      ) as string[];
+
+      if (officialSubjects.length === 0) return;
+
+      const cleanBranch = targetBranch.replace(/[\s/]+/g, '_');
+      const cleanSem = targetSem.replace(/[\s/]+/g, '_');
+
+      const subjectStatsMap: Record<string, { name: string; total: number; present: number }> = {};
+      officialSubjects.forEach(subject => {
+        subjectStatsMap[subject] = { name: subject, total: 0, present: 0 };
+      });
+
+      const results = await Promise.all(officialSubjects.map(async (subject: string) => {
+        const cleanSub = subject.replace(/[\s/]+/g, '_');
+        const snap = await getDocs(collection(db, "SubjectAttendance", `${cleanBranch}_${cleanSem}_${cleanSub}`, "dates"));
+        return { subject, snap };
+      }));
+
+      results.forEach(({ subject, snap }) => {
+        snap.forEach(dateDoc => {
+          const data = dateDoc.data();
+          subjectStatsMap[subject].total += 1;
+          if (data.attendance && data.attendance[user.regNo] === 'present') {
+            subjectStatsMap[subject].present += 1;
+          }
+        });
+      });
+
+      const subjectStatsArray = Object.values(subjectStatsMap).map((s) => ({
+        ...s,
+        percentage: s.total > 0 ? Math.round((s.present / s.total) * 100) : 0
+      }));
+
+      let totalPresent = 0;
+      let totalSessions = 0;
+      Object.values(subjectStatsMap).forEach((s) => {
+        totalPresent += s.present;
+        totalSessions += s.total;
+      });
+
+      setStudentAnalytics({
+        percentage: totalSessions > 0 ? Math.round((totalPresent / totalSessions) * 100) : 0,
+        totalPresent,
+        totalSessions,
+        subjectStats: subjectStatsArray
+      });
+    } catch (error) {
+      console.error("Analytics Error:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (view === 'profile' && selectedUser) {
+      fetchStudentAnalytics(selectedUser);
+    }
+  }, [view, selectedUser]);
 
   useEffect(() => {
     if (!userData) return;
@@ -790,6 +971,96 @@ export default function ManageUsersPage() {
                                     </>
                                 )}
                             </div>
+
+                            {/* Analytics Section for Student */}
+                            {selectedUser?.role === 'student' && studentAnalytics && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 mt-4">
+                                    {/* Gauge Card */}
+                                    <div className="bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-800 shadow-xl flex flex-col">
+                                        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-slate-800/60">
+                                            <div className="flex items-center gap-2">
+                                                <TrendingUp size={14} className="text-emerald-400" />
+                                                <h4 className="text-xs font-bold text-white uppercase tracking-[0.15em]">Attendance Health</h4>
+                                            </div>
+                                            <span
+                                                className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border"
+                                                style={{
+                                                    color: getAttendanceColor(studentAnalytics.percentage),
+                                                    borderColor: getAttendanceColor(studentAnalytics.percentage) + "40",
+                                                    backgroundColor: getAttendanceColor(studentAnalytics.percentage) + "15",
+                                                }}
+                                            >
+                                                {studentAnalytics.percentage >= 75 ? "Good" : studentAnalytics.percentage >= 45 ? "Average" : "At Risk"}
+                                            </span>
+                                        </div>
+                                        <div className="flex-1 flex flex-col items-center justify-center px-4 py-4">
+                                            <GaugeChart percentage={studentAnalytics.percentage} />
+                                            <div className="grid grid-cols-3 w-full gap-2 mt-3">
+                                                <div className="text-center p-2.5 bg-slate-950/80 rounded-xl border border-slate-800">
+                                                    <p className="text-lg font-black text-white">{studentAnalytics.totalPresent}</p>
+                                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Present</p>
+                                                </div>
+                                                <div className="text-center p-2.5 bg-slate-950/80 rounded-xl border border-slate-800">
+                                                    <p className="text-lg font-black text-white">
+                                                        {studentAnalytics.totalSessions - studentAnalytics.totalPresent}
+                                                    </p>
+                                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Absent</p>
+                                                </div>
+                                                <div className="text-center p-2.5 bg-slate-950/80 rounded-xl border border-slate-800">
+                                                    <p className="text-lg font-black text-white">{studentAnalytics.totalSessions}</p>
+                                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Total</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Analytics Bar Chart */}
+                                    <div className="bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-800 shadow-xl flex flex-col p-5">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="flex items-center gap-2.5">
+                                                <div className="p-1.5 bg-indigo-600/15 rounded-xl border border-indigo-500/20">
+                                                    <TrendingUp className="text-indigo-400" size={15} />
+                                                </div>
+                                                <div>
+                                                    <h4 className="text-sm font-bold text-white tracking-wide">Subject Analytics</h4>
+                                                    <p className="text-[10px] text-slate-500 font-medium">{studentAnalytics.subjectStats.length} subjects</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="flex-1 min-h-[200px]">
+                                            <ResponsiveContainer width="100%" height="100%" className="focus:outline-none" style={{ outline: 'none' }}>
+                                                <BarChart
+                                                    data={studentAnalytics.subjectStats}
+                                                    barCategoryGap={isDesktop ? "20%" : "30%"}
+                                                    margin={{ top: 4, right: 8, left: -16, bottom: isDesktop ? 0 : 4 }}
+                                                    style={{ outline: 'none' }}
+                                                >
+                                                    <XAxis 
+                                                        dataKey="name" 
+                                                        axisLine={false} 
+                                                        tickLine={false} 
+                                                        tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700, angle: -90, textAnchor: 'end', dy: -5, dx: -5 }} 
+                                                        height={70}
+                                                        interval={0}
+                                                    />
+                                                    <YAxis
+                                                        fontSize={10}
+                                                        tickLine={false}
+                                                        axisLine={{ stroke: 'transparent' }}
+                                                        tick={{ fill: '#64748b', fontWeight: 600 }}
+                                                        width={32}
+                                                    />
+                                                    <Bar dataKey="percentage" radius={[4, 4, 0, 0]} maxBarSize={48}>
+                                                        {studentAnalytics.subjectStats.map((entry, index) => (
+                                                            <Cell key={`cell-${index}`} fill={getAttendanceColor(entry.percentage)} />
+                                                        ))}
+                                                    </Bar>
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="flex flex-col sm:flex-row gap-4">
                                 {canModifyUser(selectedUser?.role) && (
