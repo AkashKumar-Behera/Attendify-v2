@@ -17,7 +17,9 @@ import {
   List,
   Server,
   Zap,
-  BarChart2
+  BarChart2,
+  CheckCircle2,
+  XCircle
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { collection, query, where, getDocs, getCountFromServer, collectionGroup } from "firebase/firestore";
@@ -138,6 +140,13 @@ export default function DashboardPage() {
     totalPresent: number;
     totalSessions: number;
     subjectStats: any[];
+    todayStatus: Record<string, string>;
+  } | null>(null);
+  const [teacherAnalytics, setTeacherAnalytics] = useState<{
+    avgAttendance: number;
+    totalPresent: number;
+    totalAbsent: number;
+    classStats: any[];
   } | null>(null);
 
   const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -216,11 +225,92 @@ export default function DashboardPage() {
         fetchStudentAnalytics(branch, semester);
       } else if (userData?.role === 'admin' || userData?.role === 'master') {
         fetchAdminAnalytics();
+        fetchTeacherAnalytics(sorted);
+      } else if (userData?.role === 'teacher') {
+        fetchTeacherAnalytics(sorted);
       }
     } catch (error) {
       console.error("Dashboard Fetch Error:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchTeacherAnalytics = async (schedule: any[]) => {
+    if (!userData || schedule.length === 0) return;
+    
+    try {
+      const now = new Date();
+      const d1 = `${now.getDate()}-${now.getMonth() + 1}-${now.getFullYear()}`;
+      const d2 = `${now.getDate().toString().padStart(2, '0')}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getFullYear()}`;
+      const d3 = now.toLocaleDateString('en-IN').replace(/\//g, '-');
+      const d4 = now.toLocaleDateString('en-GB').replace(/\//g, '-');
+      const todayPossibleDates = Array.from(new Set([d1, d2, d3, d4]));
+      
+      let totalPresent = 0;
+      let totalAbsent = 0;
+      const classStats: any[] = [];
+
+      await Promise.all(schedule.map(async (slot) => {
+        const cleanBranch = slot.branch.replace(/[\s/]+/g, '_');
+        const cleanSem = slot.semester.replace(/[\s/]+/g, '_');
+        const cleanSub = slot.subject.replace(/[\s/]+/g, '_');
+        const path = `${cleanBranch}_${cleanSem}_${cleanSub}`;
+        
+        const dateSnap = await getDocs(query(collection(db, "SubjectAttendance", path, "dates"), where("date", "in", todayPossibleDates)));
+        
+        let slotPresent = 0;
+        let slotAbsent = 0;
+        
+        dateSnap.forEach(doc => {
+          const data = doc.data();
+          if (data.attendance) {
+            Object.values(data.attendance).forEach(status => {
+              if (status === 'present') slotPresent++;
+              else if (status === 'absent') slotAbsent++;
+            });
+          }
+        });
+
+        const total = slotPresent + slotAbsent;
+        totalPresent += slotPresent;
+        totalAbsent += slotAbsent;
+
+        // Group by subject for the bar chart
+        const existing = classStats.find(cs => cs.name === slot.subject);
+        if (existing) {
+          existing.present += slotPresent;
+          existing.absent += slotAbsent;
+          const newTotal = existing.present + existing.absent;
+          existing.percentage = newTotal > 0 ? Math.round((existing.present / newTotal) * 100) : 0;
+        } else {
+          classStats.push({
+            name: slot.subject,
+            percentage: total > 0 ? Math.round((slotPresent / total) * 100) : 0,
+            present: slotPresent,
+            absent: slotAbsent
+          });
+        }
+      }));
+
+      const totalOverall = totalPresent + totalAbsent;
+      setTeacherAnalytics({
+        avgAttendance: totalOverall > 0 ? Math.round((totalPresent / totalOverall) * 100) : 0,
+        totalPresent,
+        totalAbsent,
+        classStats
+      });
+
+      // Update Quick Stats for Teacher
+      setStats([
+        { name: "Today's Classes", value: schedule.length.toString(), icon: Clock, color: "text-indigo-400", bg: "bg-indigo-500/10", border: "border-indigo-500/20" },
+        { name: "Avg. Attendance", value: (totalOverall > 0 ? Math.round((totalPresent / totalOverall) * 100) : 0) + "%", icon: TrendingUp, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
+        { name: "Total Present", value: totalPresent.toString(), icon: Users, color: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/20" },
+        { name: "Total Absent", value: totalAbsent.toString(), icon: AlertCircle, color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/20" },
+      ]);
+
+    } catch (err) {
+      console.error("Teacher Analytics Error:", err);
     }
   };
 
@@ -366,16 +456,36 @@ export default function DashboardPage() {
 
       let totalPresent = 0;
       let totalSessions = 0;
+      const todayStatus: Record<string, string> = {};
+      const now = new Date();
+      const d1 = `${now.getDate()}-${now.getMonth() + 1}-${now.getFullYear()}`;
+      const d2 = `${now.getDate().toString().padStart(2, '0')}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getFullYear()}`;
+      const d3 = now.toLocaleDateString('en-IN').replace(/\//g, '-');
+      const d4 = now.toLocaleDateString('en-GB').replace(/\//g, '-');
+      const todayPossibleDates = Array.from(new Set([d1, d2, d3, d4]));
+
       Object.values(subjectStatsMap).forEach((s) => {
         totalPresent += s.present;
         totalSessions += s.total;
+      });
+
+      // Check which subjects are marked today
+      results.forEach(({ subject, snap }) => {
+        snap.forEach(dateDoc => {
+          const data = dateDoc.data();
+          // Check against all possible date formats
+          if (todayPossibleDates.includes(data.date) && data.attendance && data.attendance[userData.regNo]) {
+            todayStatus[subject] = data.attendance[userData.regNo];
+          }
+        });
       });
 
       setStudentAnalytics({
         percentage: totalSessions > 0 ? Math.round((totalPresent / totalSessions) * 100) : 0,
         totalPresent,
         totalSessions,
-        subjectStats: subjectStatsArray
+        subjectStats: subjectStatsArray,
+        todayStatus
       });
     } catch (error) {
       console.error("Analytics Error:", error);
@@ -623,6 +733,24 @@ export default function DashboardPage() {
                     Live
                   </span>
                 )}
+                {(userData?.role === 'teacher' || userData?.role === 'admin' || userData?.role === 'master') && teacherAnalytics?.classStats.find(cs => cs.name === session.subject && (cs.present + cs.absent) > 0) && (
+                  <span className="absolute top-3 right-3 flex items-center gap-1 px-2 py-0.5 bg-emerald-500/20 rounded-full text-[8px] font-bold text-emerald-400 uppercase tracking-wider">
+                    <CheckCircle2 size={10} className="text-emerald-400" />
+                    Saved
+                  </span>
+                )}
+                {userData?.role === 'student' && studentAnalytics?.todayStatus && studentAnalytics.todayStatus[session.subject] && (
+                  <span className={`absolute top-3 right-3 flex items-center gap-1 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wider ${
+                    studentAnalytics.todayStatus[session.subject] === 'present' ? 'bg-emerald-500/20 text-emerald-400' :
+                    studentAnalytics.todayStatus[session.subject] === 'proxy' ? 'bg-amber-500/20 text-amber-400' :
+                    'bg-rose-500/20 text-rose-400'
+                  }`}>
+                    {studentAnalytics.todayStatus[session.subject] === 'present' ? <CheckCircle2 size={10} className="text-emerald-400" /> :
+                     studentAnalytics.todayStatus[session.subject] === 'proxy' ? <CheckCircle2 size={10} className="text-amber-400" /> :
+                     <XCircle size={10} className="text-rose-400" />}
+                    {studentAnalytics.todayStatus[session.subject]}
+                  </span>
+                )}
                 <div className="flex items-center gap-1.5 mb-2">
                   <Clock size={11} className={isActive ? 'text-blue-400' : 'text-slate-600'} />
                   <span className={`text-[10px] font-bold tracking-wider ${isActive ? 'text-blue-400' : 'text-slate-500'}`}>
@@ -653,18 +781,91 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Quick Stats (Teacher Only) */}
-      {(userData?.role === 'teacher') && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {stats.map((stat, idx) => (
-            <div key={idx} className={`p-5 rounded-2xl border ${stat.bg} ${stat.border} transition-all hover:scale-[1.02]`}>
-              <div className="flex items-center justify-between mb-3">
-                <stat.icon className={stat.color} size={18} />
-                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{stat.name}</span>
+      {/* Quick Stats & Analytics Chart (Teacher Only) */}
+      {userData?.role === 'teacher' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {stats.map((stat, idx) => (
+              <div key={idx} className={`p-5 rounded-2xl border ${stat.bg} ${stat.border} transition-all hover:scale-[1.02]`}>
+                <div className="flex items-center justify-between mb-3">
+                  <stat.icon className={stat.color} size={18} />
+                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{stat.name}</span>
+                </div>
+                <p className="text-3xl font-black text-white">{stat.value}</p>
               </div>
-              <p className="text-3xl font-black text-white">{stat.value}</p>
+            ))}
+          </div>
+
+          {teacherAnalytics && teacherAnalytics.classStats.length > 0 && (
+            <div className="bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-800 shadow-xl p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="p-2 bg-indigo-600/15 rounded-xl border border-indigo-500/20">
+                  <TrendingUp className="text-indigo-400" size={18} />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white tracking-wide uppercase">Today's Class Analytics</h4>
+                  <p className="text-[10px] text-slate-500 font-medium tracking-widest uppercase">Attendance percentage per session</p>
+                </div>
+              </div>
+
+              <div className="h-[250px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={teacherAnalytics.classStats} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <XAxis 
+                      dataKey="name" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }} 
+                    />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }} 
+                      domain={[0, 100]}
+                    />
+                    <RechartsTooltip 
+                      cursor={{ fill: 'rgba(255,255,255,0.02)', radius: 6 }}
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+                          return (
+                            <div className="bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl shadow-2xl">
+                              <p className="text-xs font-black text-white uppercase tracking-widest mb-1.5">{data.name}</p>
+                              <div className="flex items-center gap-4">
+                                <div>
+                                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Attendance</p>
+                                  <p className="text-xl font-black text-indigo-400">{data.percentage}%</p>
+                                </div>
+                                <div className="h-8 w-[1px] bg-slate-800"></div>
+                                <div>
+                                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">P / A</p>
+                                  <p className="text-sm font-black text-white">{data.present} / {data.absent}</p>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Bar 
+                      dataKey="percentage" 
+                      radius={[6, 6, 0, 0]} 
+                      barSize={40}
+                    >
+                      {teacherAnalytics.classStats.map((entry: any, index: number) => (
+                        <Cell 
+                          key={`cell-${index}`} 
+                          fill={getAttendanceColor(entry.percentage)} 
+                          fillOpacity={0.8}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
-          ))}
+          )}
         </div>
       )}
 
