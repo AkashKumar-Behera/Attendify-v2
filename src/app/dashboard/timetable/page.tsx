@@ -19,7 +19,10 @@ import {
   Users,
   ShieldCheck,
   Database,
-  ChevronRight
+  ChevronRight,
+  CheckCircle2,
+  XCircle,
+  AlertCircle
 } from "lucide-react";
 import { useAuth } from "@/lib/AuthContext";
 import { db } from "@/lib/firebase";
@@ -56,6 +59,8 @@ export default function TimetablePage() {
   const [editSubjectSearch, setEditSubjectSearch] = useState("");
   const [editingSlot, setEditingSlot] = useState<any | null>(null);
   const [timetable, setTimetable] = useState<any[]>([]);
+  const [todaySavedSlots, setTodaySavedSlots] = useState<string[]>([]);
+  const [todayStudentStatus, setTodayStudentStatus] = useState<Record<string, string>>({});
   const [availableSubjects, setAvailableSubjects] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -326,10 +331,66 @@ export default function TimetablePage() {
       }
       
       const snap = await getDocs(q);
-      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
       
       const sortedData = data.sort((a: any, b: any) => a.startTime.localeCompare(b.startTime));
       setTimetable(sortedData);
+
+      // Fetch saved status if it's today
+      const currentDayName = days[new Date().getDay() - 1] || "Sunday";
+      if (selectedDay === currentDayName) {
+        const now = new Date();
+        const d1 = `${now.getDate()}-${now.getMonth() + 1}-${now.getFullYear()}`;
+        const d2 = `${now.getDate().toString().padStart(2, '0')}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getFullYear()}`;
+        const d3 = now.toLocaleDateString('en-IN').replace(/\//g, '-');
+        const d4 = now.toLocaleDateString('en-GB').replace(/\//g, '-');
+        const todayPossibleDates = Array.from(new Set([d1, d2, d3, d4]));
+        
+        if (userData?.role === 'teacher' || userData?.role === 'admin' || userData?.role === 'master') {
+          const saved: string[] = [];
+          await Promise.all(sortedData.map(async (slot) => {
+            const cleanBranch = slot.branch.replace(/[\s/]+/g, '_');
+            const cleanSem = slot.semester.replace(/[\s/]+/g, '_');
+            const cleanSub = slot.subject.replace(/[\s/]+/g, '_');
+            const path = `${cleanBranch}_${cleanSem}_${cleanSub}`;
+            
+            const dateSnap = await getDocs(query(collection(db, "SubjectAttendance", path, "dates"), where("date", "in", todayPossibleDates)));
+            
+            let totalMarked = 0;
+            dateSnap.forEach(doc => {
+              if (doc.data().attendance) {
+                totalMarked += Object.keys(doc.data().attendance).length;
+              }
+            });
+            
+            if (totalMarked > 0) {
+              saved.push(slot.id);
+            }
+          }));
+          setTodaySavedSlots(saved);
+        } else if (userData?.role === 'student' && userData?.regNo) {
+          const statuses: Record<string, string> = {};
+          await Promise.all(sortedData.map(async (slot) => {
+            const cleanBranch = slot.branch.replace(/[\s/]+/g, '_');
+            const cleanSem = slot.semester.replace(/[\s/]+/g, '_');
+            const cleanSub = slot.subject.replace(/[\s/]+/g, '_');
+            const path = `${cleanBranch}_${cleanSem}_${cleanSub}`;
+            
+            const dateSnap = await getDocs(query(collection(db, "SubjectAttendance", path, "dates"), where("date", "in", todayPossibleDates)));
+            
+            dateSnap.forEach(doc => {
+              const data = doc.data();
+              if (data.attendance && data.attendance[userData.regNo]) {
+                statuses[slot.id] = data.attendance[userData.regNo];
+              }
+            });
+          }));
+          setTodayStudentStatus(statuses);
+        }
+      } else {
+        setTodaySavedSlots([]);
+        setTodayStudentStatus({});
+      }
     } catch (error) {
       console.error("Error fetching timetable:", error);
       setTimetable([]);
@@ -654,6 +715,30 @@ export default function TimetablePage() {
                         </div>
 
                         <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 border-white/10 pt-3 sm:pt-0">
+                           {userData?.role !== 'student' && todaySavedSlots.includes(slot.id) && (
+                             <div className="flex items-center gap-1.5 px-2 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                                <CheckCircle2 size={12} className="text-emerald-400" />
+                                <span className="text-xs font-semibold text-emerald-400">Saved</span>
+                             </div>
+                           )}
+                           {userData?.role === 'student' && todayStudentStatus[slot.id] === 'present' && (
+                             <div className="flex items-center gap-1.5 px-2 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                                <CheckCircle2 size={12} className="text-emerald-400" />
+                                <span className="text-xs font-semibold text-emerald-400">Present</span>
+                             </div>
+                           )}
+                           {userData?.role === 'student' && todayStudentStatus[slot.id] === 'proxy' && (
+                             <div className="flex items-center gap-1.5 px-2 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                                <AlertCircle size={12} className="text-amber-400" />
+                                <span className="text-xs font-semibold text-amber-400">Proxy</span>
+                             </div>
+                           )}
+                           {userData?.role === 'student' && todayStudentStatus[slot.id] === 'absent' && (
+                             <div className="flex items-center gap-1.5 px-2 py-1.5 bg-rose-500/10 border border-rose-500/20 rounded-lg">
+                                <XCircle size={12} className="text-rose-400" />
+                                <span className="text-xs font-semibold text-rose-400">Absent</span>
+                             </div>
+                           )}
                            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-950 rounded-lg border border-white/5">
                               <Clock size={12} className="text-blue-400" />
                               <span className="text-xs font-bold text-white">
