@@ -24,11 +24,14 @@ import {
   ChevronLeft,
   Hash,
   RefreshCw,
-  TrendingUp
+  TrendingUp,
+  Upload,
+  FileText
 } from "lucide-react";
 import { 
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell 
 } from 'recharts';
+import * as XLSX from 'xlsx';
 import { useAuth } from "@/lib/AuthContext";
 import { db } from "@/lib/firebase";
 import { 
@@ -142,8 +145,25 @@ export default function ManageUsersPage() {
     branch: ""
   });
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importState, setImportState] = useState<{
+    isOpen: boolean;
+    data: any[];
+    currentIndex: number;
+    status: 'idle' | 'parsing' | 'importing' | 'completed' | 'error';
+    logs: { success: boolean; message: string }[];
+  }>({
+    isOpen: false,
+    data: [],
+    currentIndex: 0,
+    status: 'idle',
+    logs: []
+  });
+
   const [selectedPrefix, setSelectedPrefix] = useState("");
   const [regSuffix, setRegSuffix] = useState("");
+  const [formStudentBranch, setFormStudentBranch] = useState("");
+  const [formStudentSemester, setFormStudentSemester] = useState("");
   
   const [status, setStatus] = useState<{ type: "idle" | "loading" | "success" | "error"; message?: string }>({
     type: "idle",
@@ -157,6 +177,8 @@ export default function ManageUsersPage() {
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editData, setEditData] = useState<any>(null);
+  const [editStudentBranch, setEditStudentBranch] = useState("");
+  const [editStudentSemester, setEditStudentSemester] = useState("");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterRole, setFilterRole] = useState("all");
@@ -258,6 +280,41 @@ export default function ManageUsersPage() {
     }
   }, [view, selectedUser]);
 
+  // Synchronize temporary edit branch and semester state from profile when entering edit mode
+  useEffect(() => {
+    if (isEditMode && editData && editData.role === 'student') {
+      const meta = resolveStudentMeta(editData);
+      setEditStudentBranch(meta.branch || "");
+      setEditStudentSemester(meta.semester || "");
+    }
+  }, [isEditMode, editData?.id]);
+
+  // Synchronize temporary branch/semester selection back to the editData.regNo prefix dynamically
+  useEffect(() => {
+    if (isEditMode && editData && editData.role === 'student' && editStudentBranch && editStudentSemester) {
+      const map = mappings.find(m => m.branch === editStudentBranch && m.semester === editStudentSemester);
+      if (map) {
+        const suffix = editData.regNo && editData.regNo.length >= 8 ? editData.regNo.substring(8) : editData.regNo || "";
+        const newRegNo = map.prefix + suffix;
+        if (editData.regNo !== newRegNo) {
+          setEditData((prev: any) => prev ? { ...prev, regNo: newRegNo } : prev);
+        }
+      }
+    }
+  }, [editStudentBranch, editStudentSemester, mappings, isEditMode]);
+
+  // Unified reverse-sync: if the user edits regNo directly and matches a mapping, update dropdown states
+  useEffect(() => {
+    if (isEditMode && editData && editData.role === 'student' && editData.regNo && editData.regNo.length >= 8) {
+      const prefix = editData.regNo.substring(0, 8);
+      const map = mappings.find(m => m.prefix === prefix);
+      if (map) {
+        if (editStudentBranch !== map.branch) setEditStudentBranch(map.branch);
+        if (editStudentSemester !== map.semester) setEditStudentSemester(map.semester);
+      }
+    }
+  }, [editData?.regNo, isEditMode, mappings]);
+
   useEffect(() => {
     if (!userData) return;
 
@@ -269,11 +326,14 @@ export default function ManageUsersPage() {
       const bSnap = await getDocs(collection(db, "branches"));
       const sSnap = await getDocs(collection(db, "semesters"));
       const bList = bSnap.docs.map(doc => doc.data().name).sort();
+      const sList = sSnap.docs.map(doc => doc.data().name).sort();
       setBranches(bList);
-      setSemesters(sSnap.docs.map(doc => doc.data().name).sort());
+      setSemesters(sList);
       if (bList.length > 0 && !formData.branch) {
         setFormData(prev => ({ ...prev, branch: bList[0] }));
       }
+      if (bList.length > 0) setFormStudentBranch(bList[0]);
+      if (sList.length > 0) setFormStudentSemester(sList[0]);
     };
     fetchConfigs();
 
@@ -308,12 +368,36 @@ export default function ManageUsersPage() {
 
   useEffect(() => {
     if (formData.role === 'student') {
+      if (formStudentBranch && formStudentSemester) {
+        const found = mappings.find(
+          m => m.branch === formStudentBranch && m.semester === formStudentSemester
+        );
+        if (found) {
+          setSelectedPrefix(found.prefix);
+        } else {
+          setSelectedPrefix("");
+        }
+      } else {
+        setSelectedPrefix("");
+      }
+    }
+  }, [formStudentBranch, formStudentSemester, mappings, formData.role]);
+
+  useEffect(() => {
+    if (formData.role === 'student') {
       setFormData(prev => ({ ...prev, regNo: selectedPrefix + regSuffix }));
     }
   }, [selectedPrefix, regSuffix, formData.role]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (formData.role === 'student' && !selectedPrefix) {
+      alert("Cannot enroll student: No batch prefix mapping exists for this combination of Branch and Semester. Please configure one in Settings or change the combo.");
+      setStatus({ type: "idle" });
+      return;
+    }
+
     setStatus({ type: "loading" });
 
     const finalFormData = { ...formData };
@@ -341,6 +425,161 @@ export default function ManageUsersPage() {
     }
   };
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportState(prev => ({ ...prev, isOpen: true, status: 'parsing', logs: [], data: [], currentIndex: 0 }));
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      
+      // Read as 2D array to check for headers
+      const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+      
+      if (rawData.length === 0) {
+        setImportState(prev => ({ ...prev, status: 'error', logs: [{ success: false, message: 'Excel file is empty.' }] }));
+        return;
+      }
+
+      // Find first non-empty row
+      let firstRow: any[] = [];
+      for (const row of rawData) {
+        if (row && row.length > 0 && row.some(cell => cell !== undefined && cell !== null && cell !== '')) {
+          firstRow = row;
+          break;
+        }
+      }
+
+      let hasHeader = false;
+      // Heuristic: check if the first row looks like column names
+      for (const cell of firstRow) {
+        if (typeof cell === 'string') {
+          const lower = cell.toLowerCase().trim();
+          // If a cell contains '@', it's almost certainly data (an email), not a header
+          if (lower.includes('@')) {
+            continue;
+          }
+          if (
+            lower === 'name' || lower.includes('student name') || lower.includes('full name') ||
+            lower === 'email' || lower === 'e-mail' || lower.includes('mail id') ||
+            lower === 'regno' || lower.includes('reg') || lower.includes('roll') || lower === 'id'
+          ) {
+            hasHeader = true;
+            break;
+          }
+        }
+      }
+
+      const parsedData: any[] = [];
+
+      if (hasHeader) {
+        // Standard parse (uses first row as keys)
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+        for (const row of jsonData as any[]) {
+          let name = "", email = "", regNo = "";
+          for (const key in row) {
+            const lowerKey = key.toLowerCase();
+            if (lowerKey.includes('name')) name = String(row[key]);
+            else if (lowerKey.includes('email') || lowerKey.includes('mail')) email = String(row[key]);
+            else if (lowerKey.includes('reg') || lowerKey.includes('roll') || lowerKey.includes('id')) regNo = String(row[key]);
+          }
+          if (name || email || regNo) parsedData.push({ name, email, regNo });
+        }
+      } else {
+        // No header. Guess columns based on content.
+        for (const row of rawData) {
+          if (!row || row.length === 0) continue;
+          let name = "", email = "", regNo = "";
+          for (const cell of row) {
+            if (!cell) continue;
+            const cellStr = String(cell).trim();
+            if (cellStr.includes('@')) {
+              email = cellStr;
+            } else if (cellStr.length >= 6 && /\d/.test(cellStr) && !cellStr.includes(' ')) {
+              // Looks like a registration number (e.g., F23029007001 or 123456)
+              regNo = cellStr;
+            } else if (cellStr.length > 2) {
+              // Probably a name
+              name = cellStr;
+            }
+          }
+          if (name || email || regNo) parsedData.push({ name, email, regNo });
+        }
+      }
+
+      if (parsedData.length === 0) {
+        setImportState(prev => ({ ...prev, status: 'error', logs: [{ success: false, message: 'No valid data found in Excel.' }] }));
+        return;
+      }
+
+      setImportState(prev => ({ ...prev, status: 'idle', data: parsedData, logs: [{ success: true, message: `Found ${parsedData.length} records. Ready to import.` }] }));
+    } catch (error) {
+      console.error(error);
+      setImportState(prev => ({ ...prev, status: 'error', logs: [{ success: false, message: 'Failed to parse Excel file.' }] }));
+    }
+    
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const startImport = async () => {
+    setImportState(prev => ({ ...prev, status: 'importing', currentIndex: 0, logs: [] }));
+    const { data } = importState;
+
+    for (let i = 0; i < data.length; i++) {
+      const student = data[i];
+      setImportState(prev => ({ ...prev, currentIndex: i + 1 }));
+
+      if (!student.name || !student.email || !student.regNo) {
+        setImportState(prev => ({ 
+            ...prev, 
+            logs: [{ success: false, message: `Row ${i + 1} skipped: Missing required fields.` }, ...prev.logs] 
+        }));
+        continue;
+      }
+
+      const payload = {
+        name: String(student.name).trim(),
+        email: String(student.email).trim(),
+        regNo: String(student.regNo).trim(),
+        password: "cvrp@123",
+        role: "student",
+        branch: ""
+      };
+
+      try {
+        const res = await fetch("/api/create-user", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const resData = await res.json();
+        if (resData.success) {
+          setImportState(prev => ({ 
+              ...prev, 
+              logs: [{ success: true, message: `Imported ${payload.regNo} (${payload.name})` }, ...prev.logs] 
+          }));
+        } else {
+          setImportState(prev => ({ 
+              ...prev, 
+              logs: [{ success: false, message: `Failed ${payload.regNo}: ${resData.error || 'Unknown error'}` }, ...prev.logs] 
+          }));
+        }
+      } catch (err) {
+        setImportState(prev => ({ 
+            ...prev, 
+            logs: [{ success: false, message: `Failed ${payload.regNo}: Network error` }, ...prev.logs] 
+        }));
+      }
+    }
+    
+    setImportState(prev => ({ ...prev, status: 'completed' }));
+    handleManualSearch(true);
+  };
+
   const handleDeleteUser = async (e: React.MouseEvent, user: any) => {
     e.stopPropagation();
 
@@ -364,6 +603,14 @@ export default function ManageUsersPage() {
       return;
     }
 
+    if (editData.role === 'student') {
+      const meta = resolveStudentMeta(editData);
+      if (meta.branch === "Unmapped" || meta.branch === "N/A") {
+        alert("Cannot update student: No batch prefix mapping exists for this combination of Branch and Semester. Please verify the Branch and Semester selection.");
+        return;
+      }
+    }
+
     const finalEditData = { ...editData };
     if (editData.role === 'student') {
       finalEditData.branch = "";
@@ -371,13 +618,17 @@ export default function ManageUsersPage() {
 
     try {
       const userRef = doc(db, "users", selectedUser.id);
-      await updateDoc(userRef, {
+      const updatePayload: any = {
         name: finalEditData.name,
         email: finalEditData.email,
         regNo: finalEditData.regNo,
         role: finalEditData.role,
         branch: finalEditData.branch
-      });
+      };
+      if (finalEditData.role === 'student' && finalEditData.regNo) {
+        updatePayload.prefix = finalEditData.regNo.substring(0, 8).toUpperCase();
+      }
+      await updateDoc(userRef, updatePayload);
       setIsEditMode(false);
       setSelectedUser({ ...selectedUser, ...finalEditData });
     } catch (err) {
@@ -449,14 +700,35 @@ export default function ManageUsersPage() {
             className="space-y-10"
           >
             {/* Header */}
-            <div>
-              <h2 className="text-3xl md:text-4xl font-bold text-white flex items-center gap-4">
-                <UserPlus className="text-blue-500" size={32} />
-                Users
-              </h2>
-              <p className="text-sm text-slate-400 mt-2">
-                {isAdmin ? "Manage Students & Teachers" : "Student Enrollment Portal"}
-              </p>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-3xl md:text-4xl font-bold text-white flex items-center gap-4">
+                  <UserPlus className="text-blue-500" size={32} />
+                  Users
+                </h2>
+                <p className="text-sm text-slate-400 mt-2">
+                  {isAdmin ? "Manage Students & Teachers" : "Student Enrollment Portal"}
+                </p>
+              </div>
+              
+              {isAdmin && (
+                <div className="flex items-center gap-3">
+                  <input 
+                    type="file" 
+                    accept=".xlsx,.xls,.csv" 
+                    className="hidden" 
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                  />
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600/10 text-emerald-400 hover:bg-emerald-600 hover:text-white border border-emerald-500/20 rounded-lg text-sm font-semibold transition-all shadow-lg"
+                  >
+                    <FileText size={18} />
+                    Import Students (Excel)
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="w-full">
@@ -521,30 +793,61 @@ export default function ManageUsersPage() {
                     
                     <div className="space-y-2">
                       <label className="text-xs font-semibold text-slate-400 ml-1">
-                        {formData.role === 'student' ? 'Reg No / Roll No' : 'Staff ID'}
+                        {formData.role === 'student' ? 'Student Batch & Roll No' : 'Staff ID'}
                       </label>
                       
                       {formData.role === 'student' ? (
-                        <div className="flex gap-3">
-                           <select 
-                             required
-                             value={selectedPrefix}
-                             onChange={e => setSelectedPrefix(e.target.value)}
-                             className="w-1/2 bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm text-blue-400 outline-none focus:border-blue-500 transition-all"
-                           >
-                              <option value="" disabled>Prefix</option>
-                              {mappings.map(m => (
-                                <option key={m.prefix} value={m.prefix}>{m.prefix}</option>
-                              ))}
-                           </select>
-                           <input
-                             type="text" required
-                             maxLength={4}
-                             value={regSuffix}
-                             onChange={(e) => setRegSuffix(e.target.value.replace(/\D/g, ""))}
-                             className="w-1/2 bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-blue-500 transition-all placeholder:text-slate-700"
-                             placeholder="Roll No"
-                           />
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-3 gap-3">
+                            <div>
+                              <select 
+                                required
+                                value={formStudentBranch}
+                                onChange={e => setFormStudentBranch(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-white outline-none focus:border-blue-500 transition-all appearance-none cursor-pointer"
+                              >
+                                <option value="" disabled>Select Branch</option>
+                                {branches.map(b => (
+                                  <option key={`form-st-branch-${b}`} value={b}>{b}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <select 
+                                required
+                                value={formStudentSemester}
+                                onChange={e => setFormStudentSemester(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-white outline-none focus:border-blue-500 transition-all appearance-none cursor-pointer"
+                              >
+                                <option value="" disabled>Select Sem</option>
+                                {semesters.map(s => (
+                                  <option key={`form-st-sem-${s}`} value={s}>{s}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <input
+                                type="text" required
+                                maxLength={4}
+                                value={regSuffix}
+                                onChange={(e) => setRegSuffix(e.target.value.replace(/\D/g, ""))}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-white outline-none focus:border-blue-500 transition-all placeholder:text-slate-700"
+                                placeholder="Roll No"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs">
+                            <span className="text-slate-400">Resolved Reg No:</span>
+                            {selectedPrefix ? (
+                              <span className="font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
+                                {selectedPrefix + (regSuffix || "XXXX")}
+                              </span>
+                            ) : (
+                              <span className="font-bold text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded animate-pulse">
+                                No mapping found!
+                              </span>
+                            )}
+                          </div>
                         </div>
                       ) : (
                         <input
@@ -879,11 +1182,14 @@ export default function ManageUsersPage() {
                                 <div className="space-y-2">
                                     <label className="text-xs font-medium text-slate-400">Branch</label>
                                     {editData.role === 'student' ? (
-                                        <input 
-                                            value={resolveStudentMeta(editData).branch}
-                                            readOnly
-                                            className="w-full bg-slate-950/50 border border-slate-800/50 rounded-lg px-4 py-3 text-sm text-slate-500 outline-none cursor-not-allowed"
-                                        />
+                                        <select 
+                                            value={editStudentBranch}
+                                            onChange={e => setEditStudentBranch(e.target.value)}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-blue-500 transition-all appearance-none cursor-pointer"
+                                        >
+                                            <option value="Unmapped" disabled>Unmapped / Select Branch</option>
+                                            {branches.map(b => <option key={`edit-st-branch-${b}`} value={b}>{b}</option>)}
+                                        </select>
                                     ) : (
                                         <select 
                                             value={editData.branch}
@@ -900,19 +1206,11 @@ export default function ManageUsersPage() {
                                     <div className="space-y-2">
                                         <label className="text-xs font-medium text-slate-400">Semester</label>
                                         <select 
-                                            value={resolveStudentMeta(editData).semester}
-                                            onChange={e => {
-                                            const newSem = e.target.value;
-                                            const branch = editData.branch || resolveStudentMeta(editData).branch;
-                                            const map = mappings.find(m => m.branch === branch && m.semester === newSem);
-                                            if (map && editData.regNo && editData.regNo.length >= 8) {
-                                                const suffix = editData.regNo.substring(8);
-                                                setEditData({...editData, regNo: map.prefix + suffix});
-                                            }
-                                            }}
-                                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-blue-500 transition-all appearance-none"
+                                            value={editStudentSemester}
+                                            onChange={e => setEditStudentSemester(e.target.value)}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-blue-500 transition-all appearance-none cursor-pointer"
                                         >
-                                            <option value="Unmapped">Select Semester</option>
+                                            <option value="Unmapped" disabled>Unmapped / Select Semester</option>
                                             {semesters.map(s => <option key={`edit-sem-${s}`} value={s}>{s}</option>)}
                                         </select>
                                     </div>
@@ -934,6 +1232,22 @@ export default function ManageUsersPage() {
                                     </div>
                                 </div>
                             )}
+                            {editData.role === 'student' && (() => {
+                                const dropdownMap = mappings.find(m => m.branch === editStudentBranch && m.semester === editStudentSemester);
+                                if (!dropdownMap) {
+                                    return (
+                                        <div className="flex items-center space-x-3 p-4 rounded-xl border border-rose-500/20 bg-rose-500/5 backdrop-blur-md text-rose-400 my-2">
+                                            <AlertCircle size={20} className="shrink-0 text-rose-500 animate-pulse" />
+                                            <div className="text-xs font-semibold leading-relaxed">
+                                                <span>No batch mapping prefix exists for <strong>{editStudentBranch || "Selected Branch"}</strong> - <strong>{editStudentSemester || "Selected Semester"}</strong>.</span>
+                                                <br />
+                                                <span className="text-slate-400 font-normal">To preserve database indexing, the registration prefix will not update until a valid mapping is selected.</span>
+                                            </div>
+                                        </div>
+                                    );
+                                }
+                                return null;
+                            })()}
                             <div className="flex gap-4 pt-4">
                                 <button 
                                     onClick={handleUpdateUser}
@@ -1102,6 +1416,119 @@ export default function ManageUsersPage() {
                     )}
                 </div>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Bulk Import Modal */}
+      <AnimatePresence>
+        {importState.isOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
+            >
+              <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
+                    <Upload className="text-emerald-400" size={20} />
+                  </div>
+                  <h3 className="text-lg font-bold text-white">Bulk Student Import</h3>
+                </div>
+                {importState.status !== 'importing' && (
+                  <button 
+                    onClick={() => setImportState(prev => ({ ...prev, isOpen: false }))}
+                    className="p-2 text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg transition-all"
+                  >
+                    <X size={18} />
+                  </button>
+                )}
+              </div>
+
+              <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar flex-1">
+                {importState.status === 'parsing' && (
+                  <div className="flex flex-col items-center justify-center py-8 space-y-4">
+                    <RefreshCw className="text-blue-500 animate-spin" size={32} />
+                    <p className="text-sm font-semibold text-slate-300">Parsing Excel File...</p>
+                  </div>
+                )}
+
+                {importState.status === 'idle' && (
+                  <div className="space-y-4">
+                    <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg flex items-start gap-3">
+                      <AlertCircle className="text-blue-400 shrink-0 mt-0.5" size={18} />
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-white">Import Ready</p>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          Found <strong>{importState.data.length}</strong> students in the file. 
+                          By default, the password will be set to <strong>cvrp@123</strong>. 
+                          Duplicates or missing fields will be skipped.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {(importState.status === 'importing' || importState.status === 'completed') && (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs font-semibold">
+                        <span className="text-slate-300">Progress</span>
+                        <span className="text-blue-400">{importState.currentIndex} / {importState.data.length}</span>
+                      </div>
+                      <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                        <motion.div 
+                          className="h-full bg-blue-500"
+                          initial={{ width: 0 }}
+                          animate={{ width: `${(importState.currentIndex / importState.data.length) * 100}%` }}
+                          transition={{ duration: 0.3 }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {importState.logs.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Import Logs</p>
+                    <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 h-48 overflow-y-auto font-mono text-[11px] space-y-2 custom-scrollbar">
+                      {importState.logs.map((log, i) => (
+                        <div key={i} className={`flex items-start gap-2 ${log.success ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          <span className="mt-0.5">{log.success ? '✓' : '✗'}</span>
+                          <span className="leading-tight break-all">{log.message}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-5 border-t border-slate-800 bg-slate-950/50 flex justify-end gap-3">
+                {importState.status === 'idle' && (
+                  <button 
+                    onClick={startImport}
+                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold transition-all shadow-lg shadow-blue-900/20"
+                  >
+                    Start Import
+                  </button>
+                )}
+                {importState.status === 'completed' && (
+                  <button 
+                    onClick={() => setImportState(prev => ({ ...prev, isOpen: false }))}
+                    className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 rounded-lg text-sm font-semibold transition-all"
+                  >
+                    Close
+                  </button>
+                )}
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
