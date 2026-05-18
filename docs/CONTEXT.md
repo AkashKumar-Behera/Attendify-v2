@@ -19,6 +19,12 @@ This file serves as a persistent memory and activity log for all AI agents (Gemi
 
 ---
 
+### [2026-05-18 01:30] | Agent: Antigravity | Task: Remove Static Student Branch Database Field | Status: Done
+- **Dynamic Branch Transition**: Removed student's static `branch` property from Firestore collection updates to prevent data redundancies and inconsistencies, as student branch is resolved dynamically from their registration prefix.
+- **Creation Handler Update**: Modified `create-user` API route to set `branch: ""` for student creation while retaining branch assignments for other roles like teachers.
+- **User Registry Form Update**: Updated the admin user creation and edit sub-handlers in `users/page.tsx` to save student branch values as empty strings.
+- **Build Verification**: Verified application build and type checking integrity using `tsc --noEmit`, completing with 0 errors.
+
 ### [2026-05-16 02:45] | Agent: Antigravity | Task: Admin Analytics & Aggregation Finalization | Status: Done
 - **Dynamic Chart Implementation**: Upgraded the static 'Attendance Velocity' AreaChart to use real-time `velocityData` dynamically fetched via Firestore `collectionGroup`.
 - **Stat Card Navigation**: Enhanced the Admin Command Center UI to act as a navigation hub—'Total Present' and 'Total Absent' cards now route directly to the History log, while 'Total Students' routes to User Registry.

@@ -316,11 +316,16 @@ export default function ManageUsersPage() {
     e.preventDefault();
     setStatus({ type: "loading" });
 
+    const finalFormData = { ...formData };
+    if (formData.role === 'student') {
+      finalFormData.branch = "";
+    }
+
     try {
       const res = await fetch("/api/create-user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(finalFormData),
       });
 
       const data = await res.json();
@@ -359,17 +364,22 @@ export default function ManageUsersPage() {
       return;
     }
 
+    const finalEditData = { ...editData };
+    if (editData.role === 'student') {
+      finalEditData.branch = "";
+    }
+
     try {
       const userRef = doc(db, "users", selectedUser.id);
       await updateDoc(userRef, {
-        name: editData.name,
-        email: editData.email,
-        regNo: editData.regNo,
-        role: editData.role,
-        branch: editData.branch
+        name: finalEditData.name,
+        email: finalEditData.email,
+        regNo: finalEditData.regNo,
+        role: finalEditData.role,
+        branch: finalEditData.branch
       });
       setIsEditMode(false);
-      setSelectedUser({ ...selectedUser, ...editData });
+      setSelectedUser({ ...selectedUser, ...finalEditData });
     } catch (err) {
       alert("Failed to synchronize user updates.");
     }
@@ -482,17 +492,19 @@ export default function ManageUsersPage() {
                       </div>
                     )}
 
-                    <div className="space-y-2 flex-1 md:max-w-[240px]">
-                      <label className="text-xs font-semibold text-slate-400 ml-1">Branch</label>
-                      <select 
-                        required
-                        value={formData.branch}
-                        onChange={e => setFormData({...formData, branch: e.target.value})}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-blue-500 transition-all appearance-none cursor-pointer"
-                      >
-                         {branches.map(b => <option key={`form-branch-${b}`} value={b}>{b}</option>)}
-                      </select>
-                    </div>
+                    {formData.role === 'teacher' && (
+                      <div className="space-y-2 flex-1 md:max-w-[240px]">
+                        <label className="text-xs font-semibold text-slate-400 ml-1">Branch</label>
+                        <select 
+                          required
+                          value={formData.branch}
+                          onChange={e => setFormData({...formData, branch: e.target.value})}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-blue-500 transition-all appearance-none cursor-pointer"
+                        >
+                           {branches.map(b => <option key={`form-branch-${b}`} value={b}>{b}</option>)}
+                        </select>
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -866,23 +878,21 @@ export default function ManageUsersPage() {
                                 </div>
                                 <div className="space-y-2">
                                     <label className="text-xs font-medium text-slate-400">Branch</label>
-                                    <select 
-                                        value={editData.branch}
-                                        onChange={e => {
-                                            const newBranch = e.target.value;
-                                            const currentSem = resolveStudentMeta(editData).semester;
-                                            const map = mappings.find(m => m.branch === newBranch && m.semester === currentSem);
-                                            if (map && editData.regNo && editData.regNo.length >= 8) {
-                                                const suffix = editData.regNo.substring(8);
-                                                setEditData({...editData, branch: newBranch, regNo: map.prefix + suffix});
-                                            } else {
-                                                setEditData({...editData, branch: newBranch});
-                                            }
-                                        }}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-blue-500 transition-all appearance-none"
-                                    >
-                                        {branches.map(b => <option key={`edit-branch-${b}`} value={b}>{b}</option>)}
-                                    </select>
+                                    {editData.role === 'student' ? (
+                                        <input 
+                                            value={resolveStudentMeta(editData).branch}
+                                            readOnly
+                                            className="w-full bg-slate-950/50 border border-slate-800/50 rounded-lg px-4 py-3 text-sm text-slate-500 outline-none cursor-not-allowed"
+                                        />
+                                    ) : (
+                                        <select 
+                                            value={editData.branch}
+                                            onChange={e => setEditData({...editData, branch: e.target.value})}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-blue-500 transition-all appearance-none"
+                                        >
+                                            {branches.map(b => <option key={`edit-branch-${b}`} value={b}>{b}</option>)}
+                                        </select>
+                                    )}
                                 </div>
                             </div>
                             {editData.role === 'student' && (

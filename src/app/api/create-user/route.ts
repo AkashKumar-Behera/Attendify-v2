@@ -31,7 +31,7 @@ export async function POST(req: Request) {
       role,
       regNo: regNo || "",
       prefix,
-      branch: branch || "",
+      branch: role === "student" ? "" : (branch || ""),
       semester: semester || "",
       createdAt: new Date(),
     });
