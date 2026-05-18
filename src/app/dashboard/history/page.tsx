@@ -173,8 +173,12 @@ export default function HistoryPage() {
         };
       });
 
-      // Sort by avg descending
-      records.sort((a, b) => b.avg - a.avg);
+      // Sort by regNo ascending
+      records.sort((a, b) => {
+        const regA = String(a.regNo || "");
+        const regB = String(b.regNo || "");
+        return regA.localeCompare(regB, undefined, { numeric: true, sensitivity: 'base' });
+      });
       setAttendanceRecords(records);
 
     } catch (err) {

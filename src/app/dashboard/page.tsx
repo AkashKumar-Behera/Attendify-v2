@@ -135,6 +135,7 @@ export default function DashboardPage() {
   const [todaySchedule, setTodaySchedule] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<any[]>([]);
+  const [totalStudentsCount, setTotalStudentsCount] = useState<number>(0);
   const [studentAnalytics, setStudentAnalytics] = useState<{
     percentage: number;
     totalPresent: number;
@@ -207,16 +208,17 @@ export default function DashboardPage() {
       const sorted = data.sort((a: any, b: any) => a.startTime.localeCompare(b.startTime));
       setTodaySchedule(sorted);
 
-      let totalStudentsCount = 0;
+      let fetchedStudentsCount = 0;
       try {
         const studentsQuery = query(collection(db, "users"), where("role", "==", "student"));
         const studentsSnap = await getCountFromServer(studentsQuery);
-        totalStudentsCount = studentsSnap.data().count;
+        fetchedStudentsCount = studentsSnap.data().count;
+        setTotalStudentsCount(fetchedStudentsCount);
       } catch (e) { console.error(e); }
 
       setStats([
         { name: "Today's Classes", value: sorted.length.toString(), icon: Clock, color: "text-indigo-400", bg: "bg-indigo-500/10", border: "border-indigo-500/20" },
-        { name: "Total Students", value: totalStudentsCount.toString(), icon: Users, color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" },
+        { name: "Total Students", value: fetchedStudentsCount.toString(), icon: Users, color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" },
         { name: "System Status", value: "Online", icon: ShieldCheck, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
         { name: "Notifications", value: "0", icon: AlertCircle, color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/20" },
       ]);
@@ -904,7 +906,7 @@ export default function DashboardPage() {
           {/* Admin Specific Quick Stats */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {(() => {
-              const baseUsers = stats.find(s => s.name === "Total Students")?.value || "0";
+              const baseUsers = totalStudentsCount.toString();
               const currentAgg = adminAggregate ? adminAggregate[adminTimeFilter] : { present: 0, absent: 0, total: 0 };
               
               const formatNumber = (num: number) => new Intl.NumberFormat('en-IN').format(num);
