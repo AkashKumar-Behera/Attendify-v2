@@ -42,3 +42,8 @@ next-env.d.ts
 fix_commits.sh
 /scripts/seed-admin.mjs.backup
 
+# scratch and analysis files
+/scratch_inspect_excel.js
+/scratch_test_query.js
+/scratch/
+/docs/analysis_results.md
