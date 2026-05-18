@@ -19,6 +19,14 @@ This file serves as a persistent memory and activity log for all AI agents (Gemi
 
 ---
 
+### [2026-05-18 02:50] | Agent: Antigravity | Task: Excel Bulk Ingestion, Dynamic Prefix Mappings & Analytics Integration | Status: Done
+- **Dynamic Semester-to-Prefix Auto-Sync**: Integrated dynamic registration number prefix updates in user registry modals on semester/branch selection changes to maintain referential data mapping and prevent index mismatch.
+- **Bulk Student Excel Importer**: Built a SheetJS-based bulk Excel import system with automated column heuristic detectors (matching emails, names, registration numbers without explicit headers) and integrated progress loading updates with detailed log reporting.
+- **Default Password Onboarding**: Established standard default user credentials (`cvrp@123`) across bulk importing and individual student creation tasks.
+- **Dashboard Count and Analytics Correction**: Resolved critical state rendering issues to ensure system student totals query the database server-side efficiently.
+- **History Log Registry Sorting**: Restructured attendance lists in the history dashboard to sort records lexicographically based on `regNo` for improved administrative auditing.
+- **System Verification**: Verified type safety (`tsc --noEmit`) and compiled Next.js optimized production bundle (`npm run build`) successfully with zero warnings/errors.
+
 ### [2026-05-18 01:30] | Agent: Antigravity | Task: Remove Static Student Branch Database Field | Status: Done
 - **Dynamic Branch Transition**: Removed student's static `branch` property from Firestore collection updates to prevent data redundancies and inconsistencies, as student branch is resolved dynamically from their registration prefix.
 - **Creation Handler Update**: Modified `create-user` API route to set `branch: ""` for student creation while retaining branch assignments for other roles like teachers.
