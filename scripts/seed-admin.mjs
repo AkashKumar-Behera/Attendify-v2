@@ -59,4 +59,5 @@ async function createMasterAdmin(email, password, name) {
 }
 
 // EDIT THESE DETAILS
-createMasterAdmin("roy821akash@gmail.com", "akash@123", "Akash");
+createMasterAdmin("admin@example.com", "defaultPassword123", "Admin User");
+
